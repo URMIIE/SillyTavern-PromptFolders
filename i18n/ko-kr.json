@@ -134,5 +134,21 @@
     "Google Vertex AI": "Google Vertex AI",
     "OpenRouter": "OpenRouter",
     "DeepSeek": "DeepSeek",
-    "Prompt Folders": "프롬프트 그룹"
+    "Prompt Folders": "프롬프트 그룹",
+    "Edit groups": "그룹 편집",
+    "Groups": "그룹",
+    "Picked group": "고른 그룹",
+    "Remove from group": "그룹에서 빼기",
+    "Group name": "그룹 이름",
+    "Only one on": "하나만 켜기",
+    "(no name)": "(이름 없음)",
+    "Put in \"${0}\"": "「${0}」에 넣기",
+    "Pick a group on the left": "왼쪽에서 그룹을 고르세요",
+    "No groups yet. Add one with + New group.": "아직 그룹이 없어요. 「+ 그룹 만들기」로 만들어 보세요.",
+    "Grouped by divider toggles and similar names. Fix names, move toggles, then create.": "구분선과 비슷한 이름끼리 묶었어요. 이름을 고치고 토글을 옮긴 뒤 만들기를 누르세요.",
+    "Couldn't find anything to group automatically in this preset. Try regrouping with AI.": "이 프리셋에선 자동으로 묶을 걸 찾지 못했어요. 「AI로 다시 묶기」를 눌러 보세요.",
+    "Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.": "왼쪽에서 그룹을 고르고, 오른쪽에서 토글을 골라 넣으세요. ＋로 그룹 안에 그룹을 몇 단계든 만들 수 있어요.",
+    "Grouped by AI. Fix names, move toggles, then create.": "AI가 묶었어요. 이름을 고치고 토글을 옮긴 뒤 만들기를 누르세요.",
+    "Groups saved.": "그룹을 저장했어요.",
+    "Edit all groups": "그룹 한꺼번에 편집"
 }

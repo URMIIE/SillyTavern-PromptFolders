@@ -872,6 +872,7 @@ function openToolsMenu(anchor) {
     info.textContent = presetKey();
     menu.append(info);
     item('fa-wand-magic-sparkles', tr`Auto-group`, autoGroup);
+    item('fa-pen-to-square', tr`Edit all groups`, () => openGroupEditor({}));
     const sepL = document.createElement('div');
     sepL.className = 'pf-menu-sep';
     sepL.textContent = tr`Group placement`;
@@ -1198,7 +1199,7 @@ Return ONLY JSON: {"groups":[{"name":"","items":[0,1],"children":[{"name":"","it
 - Follow the preset's own sections when it has them; otherwise group by purpose (language, POV, style, pacing, NSFW, trackers, reasoning, jailbreak/system, etc.).
 - Put "pick one" alternatives together. Keep a section's opening and closing marker in that section's group.
 - Prefer neighbouring toggles; each index at most once; toggles that fit nowhere can stay out.
-- 4 to 14 top-level groups. children are optional sub-folders (at least 2 items each).
+- At most two levels: 4 to 12 top-level groups, and inside a top-level group put children (sub-folders, at least 2 items each) when it holds two or more distinct sets — e.g. a style category with separate "pick one" sets. Never nest deeper than that.
 - name: short Korean (2–12 characters) starting with one fitting emoji, e.g. "🌐 언어", "🎬 문체".`;
 
 /** 실리태번 연결 프로필 목록 (Connection Manager) */
@@ -1435,134 +1436,9 @@ async function aiPlan(order, getPrompt, signal) {
     return plan.sort((a, b) => first(a) - first(b));
 }
 
-/** 자동 그룹: 계획을 미리보기 창에 보여 주고, 고른 것만 만듦 */
+/** 자동 그룹: 계획을 그룹 편집기에 채워 보여 줌 (고친 뒤 만들기) */
 async function autoGroup() {
-    const pm = promptManager;
-    if (!pm?.activeCharacter) return;
-    const order = pm.getPromptOrderForCharacter(pm.activeCharacter) || [];
-    const getPrompt = id => pm.getPromptById(id);
-    const plan = planAutoGroups(order, getPrompt);
-    const data = presetData();
-    const nameOf = id => String(getPrompt(id)?.name ?? id);
-    const e = escapeHtml;
-    let mode = data.groups.length ? 'free' : 'all';
-    const picked = new Map();   // plan node → { on, name }
-    const resetPicked = () => { picked.clear(); plan.flatMap(g => [g, ...g.children]).forEach(n => picked.set(n, { on: true, name: n.name })); };
-    resetPicked();
-    const open = new Set();   // 펼쳐 둔 줄
-    const skip = new Set();   // 미리보기에서 체크를 푼 토글 — 어느 그룹에도 안 넣음
-
-    const root = document.createElement('div');
-    root.className = 'pf-editor pf-auto';
-    root.innerHTML = `
-        <h3 class="pf-ed-title">${e(tr`Auto-group preview`)}</h3>
-        <div class="pf-ed-summary">${e(tr`Grouped by divider toggles and similar names. Untick what you don't want, fix names, then create.`)}</div>
-        <div class="pf-auto-ai"><button type="button" class="menu_button pf-auto-ai-run"><i class="fa-solid fa-wand-magic-sparkles"></i><span>${e(tr`Regroup with AI`)}</span></button><small class="pf-auto-ai-note">${e(tr`Sends only the toggle names (not their text) once to the chosen connection.`)}</small>${aiPickersHtml()}</div>
-        <div class="pf-ed-filter" role="radiogroup">
-            <button type="button" class="pf-ed-chip" data-m="free" role="radio">${e(tr`Only toggles not in a group`)}</button>
-            <button type="button" class="pf-ed-chip" data-m="all" role="radio">${e(tr`Regroup everything`)}</button>
-        </div>
-        <ul class="pf-auto-list"></ul>`;
-    const list = root.querySelector('.pf-auto-list');
-
-    const membersFor = n => {
-        const grouped = mode === 'free' ? new Set(data.groups.flatMap(g => g.members)) : new Set();
-        return n.members.filter(id => !grouped.has(id));
-    };
-    const keptFor = n => membersFor(n).filter(id => !skip.has(id));
-    const render = () => {
-        root.querySelectorAll('.pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.m === mode)));
-        list.innerHTML = plan.length ? '' : `<li class="pf-auto-none">${e(tr`Couldn't find anything to group automatically in this preset.`)} ${e(tr`Try regrouping with AI.`)}</li>`;
-        for (const g of plan) {
-            const rowOf = (n, sub) => {
-                const st = picked.get(n);
-                const ids = membersFor(n);
-                const total = keptFor(n).length + (sub ? 0 : n.children.reduce((s, c) => s + (picked.get(c).on ? keptFor(c).length : 0), 0));
-                const li = document.createElement('li');
-                li.className = 'pf-auto-row' + (sub ? ' pf-auto-sub' : '') + (st.on ? '' : ' pf-auto-off') + (total < 2 ? ' pf-auto-empty' : '');
-                li.innerHTML = `
-                    <input type="checkbox" ${st.on && total >= 2 ? 'checked' : ''} ${total < 2 ? 'disabled' : ''} aria-label="${e(tr`Create this group`)}">
-                    <input type="text" class="text_pole pf-auto-name" value="${e(st.name)}" placeholder="${e(tr`No name — e.g. ${nameOf(ids[1] ?? ids[0] ?? '')}`)}">
-                    <button type="button" class="pf-auto-count" aria-expanded="false" title="${e(tr`Show toggles`)}">${total}<i class="fa-solid fa-chevron-down"></i></button>
-                    <ol class="pf-auto-items" hidden>${ids.map(id => `<li><label><input type="checkbox" data-id="${e(id)}" ${skip.has(id) ? '' : 'checked'}><span>${e(nameOf(id))}</span></label></li>`).join('')}</ol>`;
-                li.querySelector('input[type=checkbox]').addEventListener('change', ev => { st.on = ev.target.checked; render(); });
-                li.querySelectorAll('.pf-auto-items input[data-id]').forEach(box => box.addEventListener('change', () => {
-                    if (box.checked) skip.delete(box.dataset.id); else skip.add(box.dataset.id);
-                    open.add(n);
-                    render();
-                }));
-                li.querySelector('.pf-auto-name').addEventListener('input', ev => { st.name = ev.target.value; });
-                if (open.has(n)) { li.querySelector('.pf-auto-items').hidden = false; li.querySelector('.pf-auto-count').setAttribute('aria-expanded', 'true'); }
-                li.querySelector('.pf-auto-count').addEventListener('click', ev => {
-                    const ol = li.querySelector('.pf-auto-items');
-                    ol.hidden = !ol.hidden;
-                    if (ol.hidden) open.delete(n); else open.add(n);
-                    ev.currentTarget.setAttribute('aria-expanded', String(!ol.hidden));
-                });
-                return li;
-            };
-            list.append(rowOf(g, false));
-            g.children.forEach(c => list.append(rowOf(c, true)));
-        }
-    };
-    root.querySelectorAll('.pf-ed-chip').forEach(c => c.addEventListener('click', () => { mode = c.dataset.m; render(); }));
-    bindAiPickers(root);
-    const aiBtn = root.querySelector('.pf-auto-ai-run');
-    let running = null;
-    aiBtn.addEventListener('click', async () => {
-        const label = aiBtn.querySelector('span');
-        if (running) { running.abort(); return; }   // 다시 누르면 멈춤
-        if (!(await confirmAiSend(order.filter(x => getPrompt(x.identifier)).length))) return;
-        running = new AbortController();
-        const t0 = Date.now();
-        const tick = () => { label.textContent = tr`AI is grouping… ${Math.round((Date.now() - t0) / 1000)}s (click to stop)`; };
-        tick(); const timer = setInterval(tick, 1000);
-        aiBtn.classList.add('pf-busy');
-        try {
-            const next = await aiPlan(order, getPrompt, running.signal);
-            if (!next.length) { toastr.info(tr`AI found nothing to group.`, tr`Prompt Folders`); return; }
-            plan.splice(0, plan.length, ...next);
-            skip.clear(); open.clear(); resetPicked();
-            mode = 'all';
-            root.querySelector('.pf-ed-summary').textContent = tr`Grouped by AI. Untick what you don't want, fix names, then create.`;
-            render();
-        } catch (err) {
-            if (!running?.signal.aborted) toastr.error(`${tr`Regroup with AI`}: ${String(err?.message || err)}`, tr`Prompt Folders`);
-        } finally { clearInterval(timer); running = null; aiBtn.classList.remove('pf-busy'); label.textContent = tr`Regroup with AI`; }
-    });
-    render();
-
-    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Create`, cancelButton: tr`Cancel`, wider: true, allowVerticalScrolling: true });
-    if (!ok || !plan.length) return;
-    const undo = structuredClone(data.groups);
-    if (mode === 'all' && data.groups.length) {
-        const sure = await callGenericPopup(escapeHtml(tr`Remove the current ${data.groups.length} groups of this preset and regroup? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
-        if (!sure) return;
-        data.groups = [];
-    }
-    const taken = new Set([...data.groups.flatMap(g => g.members), ...skip]);
-    let made = 0;
-    const nameFor = (n, ids) => (picked.get(n).name || '').trim() || nameOf(ids[1] ?? ids[0]).trim() || tr`Group ${data.groups.length + 1}`;
-    for (const g of plan) {
-        const kids = g.children.filter(c => picked.get(c).on).map(c => ({ c, ids: c.members.filter(id => !taken.has(id)) })).filter(k => k.ids.length >= 2);
-        const direct = g.members.filter(id => !taken.has(id));
-        // 하위 그룹으로 안 만든 하위 묶음의 토글은 큰 그룹에 바로
-        g.children.filter(c => !kids.some(k => k.c === c)).forEach(c => direct.push(...c.members.filter(id => !taken.has(id))));
-        if (!picked.get(g).on) {
-            kids.forEach(k => { data.groups.push({ id: newId(), name: nameFor(k.c, k.ids), members: k.ids, parent: null, collapsed: true }); k.ids.forEach(id => taken.add(id)); made++; });
-            continue;
-        }
-        if (direct.length + kids.reduce((s, k) => s + k.ids.length, 0) < 2) continue;
-        const top = { id: newId(), name: nameFor(g, direct), members: direct, parent: null, collapsed: true };
-        data.groups.push(top);
-        direct.forEach(id => taken.add(id));
-        made++;
-        kids.forEach(k => { data.groups.push({ id: newId(), name: nameFor(k.c, k.ids), members: k.ids, parent: top.id, collapsed: true }); k.ids.forEach(id => taken.add(id)); made++; });
-    }
-    settings().view = 'grouped';
-    save();
-    apply();
-    offerUndo(undo, tr`${made} groups created.`);
+    return openGroupEditor({ auto: true });
 }
 
 /** 이 프리셋의 그룹을 모두 풀기 (토글은 그대로) — 알림에서 되돌리기 */
@@ -1767,190 +1643,289 @@ function toggleAll(ids, target) {
 }
 
 function createGroup(parentId = null) {
-    return openEditor(null, parentId);
+    return openGroupEditor({ addNew: true, newParent: parentId });
 }
 
 function startEditing(g) {
-    return openEditor(g, g.parent || null);
+    return openGroupEditor({ focusId: g.id });
 }
 
-/** 그룹 편집 창: 이름 · 넣을 곳 · 검색 · 체크로 여러 개 고르기 (Shift+클릭 범위, 끌어서 칠하기) */
-async function openEditor(g, parentId) {
+/** 자동 그룹 계획(큰 그룹 → 작은 그룹, 최대 2단) → 편집기 초안 그룹. free 면 지금 그룹은 두고 그룹 없는 토글만 */
+function planToDraft(plan, mode, existing, nameOf) {
+    const base = mode === 'free' ? structuredClone(existing) : [];
+    const taken = new Set(base.flatMap(g => g.members));
+    const take = ids => ids.filter(id => !taken.has(id) && taken.add(id));
+    const nameFor = (n, ids) => (n.name || '').trim() || String(nameOf(ids[1] ?? ids[0] ?? '') || '').trim() || tr`Group ${base.length + 1}`;
+    for (const n of plan) {
+        const top = { id: newId(), name: '', members: take(n.members), parent: null, collapsed: true, ...(n.exclusive ? { exclusive: true } : {}) };
+        const kids = (n.children || []).map(c => ({ id: newId(), name: '', members: take(c.members), parent: top.id, collapsed: true, ...(c.exclusive ? { exclusive: true } : {}), _n: c })).filter(k => k.members.length);
+        if (!top.members.length && !kids.length) continue;
+        top.name = nameFor(n, top.members.length ? top.members : kids[0].members);
+        kids.forEach(k => { k.name = nameFor(k._n, k.members); delete k._n; });
+        base.push(top, ...kids);
+    }
+    return base;
+}
+
+/**
+ * 그룹 편집기 (한 창): 왼쪽 그룹 목록(최대 2단 — 이름 고치기 · 하위 그룹 · 택1 · 지우기), 오른쪽 토글 목록(여러 개 골라 한 번에 넣기 · 빼기).
+ * 그룹 만들기 · 그룹 편집 · 안에 새 그룹 · 자동으로 그룹 만들기가 모두 이 창을 씀. 저장(만들기)을 눌러야 반영, 반영 뒤 알림에서 되돌리기.
+ */
+async function openGroupEditor({ focusId = null, addNew = false, newParent = null, auto = false } = {}) {
     const pm = promptManager;
     if (!pm?.activeCharacter) return;
     const data = presetData();
-    const tree = makeTree(data.groups);
     const rawOrder = pm.getPromptOrderForCharacter(pm.activeCharacter) || [];
-    const hdr = findHeaders(rawOrder, id => pm.getPromptById(id));
-    const order = rawOrder.map((e, i) => {
-        const p = pm.getPromptById(e.identifier);
-        return { id: e.identifier, pos: i + 1, name: String(p?.name ?? e.identifier), on: !!e.enabled, divider: hdr.has(e.identifier) };
-    });
-    const groupOf = new Map();
-    data.groups.forEach(x => x.members.forEach(id => groupOf.set(id, x)));
-    // 편집: 하위 그룹에 든 토글까지 체크된 채로 (그룹 전체를 다룸)
-    const selected = new Set(g ? makeTree(data.groups).allItems(g) : []);
+    const getPrompt = id => pm.getPromptById(id);
+    const hdr = findHeaders(rawOrder, getPrompt);
+    const order = rawOrder.filter(x => getPrompt(x.identifier)).map((x, i) => ({ id: x.identifier, pos: i + 1, name: String(getPrompt(x.identifier)?.name ?? x.identifier), on: !!x.enabled, divider: hdr.has(x.identifier) }));
+    const at = new Map(order.map((x, i) => [x.id, i]));
+    const nameOf = id => order[at.get(id)]?.name ?? id;
     const e = escapeHtml;
 
-    const root = document.createElement('div');
-    root.className = 'pf-editor';
-    const parents = data.groups.filter(x => !g || (x !== g && !tree.isDescendant(x, g)));
-    root.innerHTML = `
-        <h3 class="pf-ed-title">${e(g ? tr`Edit "${g.name}"` : tr`New group`)}</h3>
-        ${g && tree.childrenOf(g).length ? `<div class="pf-ed-summary">${e(tr`Includes ${tree.childrenOf(g).length} sub-groups. Checked toggles stay where they are; unchecking removes them from this group.`)}</div>` : ''}
-        <div class="pf-ed-fields">
-            <label class="pf-ed-field"><span>${e(tr`Name`)}</span><input type="text" class="text_pole pf-ed-name" value="${e(g?.name ?? '')}" placeholder="${e(tr`Name of the new group`)}"></label>
-            <label class="pf-ed-field"><span>${e(tr`Inside`)}</span><select class="text_pole pf-ed-parent">
-                <option value="">${e(tr`Top level`)}</option>
-                ${parents.map(x => `<option value="${e(x.id)}" ${x.id === parentId ? 'selected' : ''}>${e(tree.path(x).map(y => y.name).join(' › '))}</option>`).join('')}
-            </select></label>
-        </div>
-        <div class="pf-ed-bar">
-            <label class="pf-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="${e(tr`Search toggles`)}" aria-label="${e(tr`Search toggles`)}"></label>
-            <button type="button" class="pf-tb pf-ed-all">${e(tr`Select shown`)}</button>
-            <button type="button" class="pf-tb pf-ed-none">${e(tr`Clear`)}</button>
-        </div>
-        <div class="pf-ed-filter" role="radiogroup">
-            <button type="button" class="pf-ed-chip" data-f="all" role="radio">${e(tr`All`)}</button>
-            ${g ? `<button type="button" class="pf-ed-chip" data-f="mine" role="radio">${e(tr`This group`)}</button>` : ''}
-            <button type="button" class="pf-ed-chip" data-f="free" role="radio">${e(tr`Not in a group`)}</button>
-        </div>
-        <div class="pf-ed-meta"><span class="pf-ed-count"></span><span class="pf-ed-hint">${e(matchMedia('(pointer: coarse)').matches ? tr`Pick many: long-press, then drag` : tr`Pick many: drag · Shift+click for a range`)}</span></div>
-        <ul class="pf-ed-list" role="listbox" aria-multiselectable="true"></ul>`;
-    const list = root.querySelector('.pf-ed-list');
-    const count = root.querySelector('.pf-ed-count');
-    const updateCount = () => { count.textContent = tr`${selected.size} selected`; };
+    let plan = auto ? planAutoGroups(rawOrder, getPrompt) : [];
+    let mode = data.groups.length ? 'free' : 'all';
+    let draft = auto ? planToDraft(plan, mode, data.groups, nameOf) : structuredClone(data.groups);
+    let sel = focusId;   // 고른 그룹 (토글을 넣을 곳)
+    const addGroup = parent => { const g = { id: newId(), name: '', members: [], parent, collapsed: false }; draft.push(g); sel = g.id; return g; };
+    if (addNew) addGroup(newParent);
+    const selected = new Set();   // 고른 토글
 
+    const root = document.createElement('div');
+    root.className = 'pf-editor pf-be';
+    root.innerHTML = `
+        <h3 class="pf-ed-title">${e(auto ? tr`Auto-group` : tr`Edit groups`)}</h3>
+        <div class="pf-ed-summary"></div>
+        ${auto ? `<div class="pf-auto-ai"><button type="button" class="menu_button pf-auto-ai-run"><i class="fa-solid fa-wand-magic-sparkles"></i><span>${e(tr`Regroup with AI`)}</span></button><small class="pf-auto-ai-note">${e(tr`Sends only the toggle names (not their text) once to the chosen connection.`)}</small>${aiPickersHtml()}</div>
+        <div class="pf-ed-filter pf-be-mode" role="radiogroup">
+            <button type="button" class="pf-ed-chip" data-m="free" role="radio">${e(tr`Only toggles not in a group`)}</button>
+            <button type="button" class="pf-ed-chip" data-m="all" role="radio">${e(tr`Regroup everything`)}</button>
+        </div>` : ''}
+        <div class="pf-be-panes">
+            <section class="pf-be-groups">
+                <div class="pf-be-head"><b>${e(tr`Groups`)}</b><button type="button" class="pf-tb pf-be-add"><i class="fa-solid fa-plus"></i> ${e(tr`New group`)}</button></div>
+                <ul class="pf-be-tree" role="listbox" aria-label="${e(tr`Groups`)}"></ul>
+            </section>
+            <section class="pf-be-items">
+                <div class="pf-ed-bar">
+                    <label class="pf-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="${e(tr`Search toggles`)}" aria-label="${e(tr`Search toggles`)}"></label>
+                </div>
+                <div class="pf-ed-filter pf-be-filter" role="radiogroup">
+                    <button type="button" class="pf-ed-chip" data-f="all" role="radio">${e(tr`All`)}</button>
+                    <button type="button" class="pf-ed-chip" data-f="mine" role="radio">${e(tr`Picked group`)}</button>
+                    <button type="button" class="pf-ed-chip" data-f="free" role="radio">${e(tr`Not in a group`)}</button>
+                </div>
+                <div class="pf-ed-meta"><span class="pf-ed-hint">${e(matchMedia('(pointer: coarse)').matches ? tr`Pick many: long-press, then drag` : tr`Pick many: drag · Shift+click for a range`)}</span></div>
+                <ul class="pf-ed-list" role="listbox" aria-multiselectable="true"></ul>
+                <div class="pf-be-actions">
+                    <span class="pf-ed-count"></span>
+                    <button type="button" class="menu_button pf-be-put"></button>
+                    <button type="button" class="menu_button pf-be-out">${e(tr`Remove from group`)}</button>
+                    <button type="button" class="pf-tb pf-be-clear">${e(tr`Clear`)}</button>
+                </div>
+            </section>
+        </div>`;
+    const treeEl = root.querySelector('.pf-be-tree'), list = root.querySelector('.pf-ed-list');
+    const count = root.querySelector('.pf-ed-count'), putBtn = root.querySelector('.pf-be-put'), outBtn = root.querySelector('.pf-be-out');
+    const summary = root.querySelector('.pf-ed-summary');
+    const setSummary = text => { summary.textContent = text; };
+    setSummary(auto ? (plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
+
+    const tree = () => makeTree(draft);
+    const groupOf = id => draft.find(g => g.members.includes(id)) || null;
+    const depthOf = g => (tree().parentOf(g) ? 1 : 0);
+    const firstAt = g => Math.min(1e9, ...tree().allItems(g).map(id => at.get(id) ?? 1e9));
+    const colorOf = g => { const t = tree(); return groupColor(g, t.indexOf(g), t); };
+
+    function renderTree() {
+        const t = tree();
+        const tops = draft.filter(g => !t.parentOf(g)).sort((a, b) => firstAt(a) - firstAt(b) || draft.indexOf(a) - draft.indexOf(b));
+        // 직접 편집은 단계 제한 없음 — 깊이만큼 들여 씀
+        const row = (g, depth) => {
+            const n = t.allItems(g).length, top = !depth;
+            return `<li class="pf-be-g${sel === g.id ? ' pf-be-sel' : ''}${top ? '' : ' pf-be-sub'}" data-g="${e(g.id)}" role="option" aria-selected="${sel === g.id}" style="--pf-color:${colorOf(g)};--pf-depth:${depth}">
+                <span class="pf-be-dot"></span>
+                <input type="text" class="text_pole pf-be-name" value="${e(g.name)}" placeholder="${e(tr`Group name`)}" aria-label="${e(tr`Group name`)}">
+                <span class="pf-be-n">${n}</span>
+                <button type="button" class="pf-be-ic" data-act="sub" title="${e(tr`New group inside`)}" aria-label="${e(tr`New group inside`)}"><i class="fa-solid fa-folder-plus"></i></button>
+                <button type="button" class="pf-be-ic${g.exclusive ? ' on' : ''}" data-act="excl" title="${e(tr`Only one on`)}" aria-pressed="${!!g.exclusive}" aria-label="${e(tr`Only one on`)}">${e(tr`Pick 1`)}</button>
+                <button type="button" class="pf-be-ic" data-act="del" title="${e(tr`Ungroup`)}" aria-label="${e(tr`Ungroup`)}"><i class="fa-solid fa-xmark"></i></button>
+            </li>`;
+        };
+        const free = order.filter(x => !groupOf(x.id)).length;
+        const branch = (g, depth, seen = new Set()) => seen.has(g) ? '' : (seen.add(g), row(g, depth) + t.childrenOf(g).sort((a, b) => firstAt(a) - firstAt(b)).map(k => branch(k, depth + 1, seen)).join(''));
+        treeEl.innerHTML = tops.map(g => branch(g, 0)).join('')
+            + `<li class="pf-be-g pf-be-none${sel === '' ? ' pf-be-sel' : ''}" data-g="" role="option" aria-selected="${sel === ''}"><span class="pf-be-dot"></span><span class="pf-be-label">${e(tr`Not in a group`)}</span><span class="pf-be-n">${free}</span></li>`;
+        if (!draft.length) treeEl.insertAdjacentHTML('afterbegin', `<li class="pf-be-empty">${e(tr`No groups yet. Add one with + New group.`)}</li>`);
+        updateActions();
+    }
+    const focusName = id => setTimeout(() => treeEl.querySelector(`[data-g="${CSS.escape(id)}"] .pf-be-name`)?.focus(), 30);
+    treeEl.addEventListener('input', ev => {
+        const inp = ev.target.closest('.pf-be-name'); if (!inp) return;
+        const g = draft.find(x => x.id === inp.closest('[data-g]').dataset.g); if (g) { g.name = inp.value; refreshTags(); updateActions(); }
+    });
+    treeEl.addEventListener('click', ev => {
+        const li = ev.target.closest('[data-g]'); if (!li) return;
+        const g = draft.find(x => x.id === li.dataset.g);
+        const act = ev.target.closest('[data-act]')?.dataset.act;
+        if (act === 'sub' && g) { const k = addGroup(g.id); if (selected.size) putInto(k); renderTree(); refilter(); focusName(k.id); return; }
+        if (act === 'excl' && g) { g.exclusive = !g.exclusive; renderTree(); return; }
+        if (act === 'del' && g) {
+            const t = tree();
+            t.childrenOf(g).forEach(k => { k.parent = g.parent || null; });
+            draft = draft.filter(x => x !== g);
+            if (sel === g.id) sel = null;
+            renderTree(); refreshTags(); refilter(); return;
+        }
+        if (ev.target.closest('.pf-be-name') && sel === li.dataset.g) return;
+        sel = li.dataset.g;
+        renderTree();
+        if (filter === 'mine') refilter();
+    });
+    root.querySelector('.pf-be-add').addEventListener('click', () => { const g = addGroup(null); if (selected.size) putInto(g); renderTree(); refilter(); focusName(g.id); });
+
+    // 토글 목록 — 고르기는 예전 편집 창과 같음 (누르기 · Shift 범위 · 끌어 칠하기 · 폰은 길게 누른 뒤 끌기)
     for (const it of order) {
         const li = document.createElement('li');
         li.className = 'pf-ed-row' + (it.divider ? ' pf-ed-div' : '') + (it.on ? '' : ' pf-ed-off');
         li.dataset.id = it.id;
         li.setAttribute('role', 'option');
-        const other = groupOf.get(it.id);
-        const tag = other && other !== g ? `<span class="pf-ed-tag" style="--pf-color:${groupColor(other, tree.indexOf(other), tree)}">${e(tree.path(other).map(y => y.name).join(' › '))}</span>` : '';
-        li.innerHTML = `<input type="checkbox" tabindex="-1"><span class="pf-ed-pos">#${it.pos}</span><span class="pf-ed-name-text">${e(it.name)}</span>${tag}`;
+        li.innerHTML = `<input type="checkbox" tabindex="-1"><span class="pf-ed-pos">#${it.pos}</span><span class="pf-ed-name-text">${e(it.name)}</span><span class="pf-ed-tag"></span>`;
         list.append(li);
     }
     const rows = [...list.children];
+    function refreshTags() {
+        const t = tree();
+        rows.forEach(li => {
+            const g = groupOf(li.dataset.id), tag = li.querySelector('.pf-ed-tag');
+            tag.hidden = !g;
+            if (g) { tag.style.setProperty('--pf-color', colorOf(g)); tag.textContent = t.path(g).map(y => y.name || tr`(no name)`).join(' › '); }
+        });
+    }
     const setRow = (li, on) => {
         li.querySelector('input').checked = on;
         li.classList.toggle('pf-ed-sel', on);
         li.setAttribute('aria-selected', String(on));
         if (on) selected.add(li.dataset.id); else selected.delete(li.dataset.id);
     };
-    rows.forEach(li => setRow(li, selected.has(li.dataset.id)));
-    updateCount();
-
-    // 마우스: 누르기 · Shift+클릭 범위 · 누른 채 끌어서 칠하기
-    // 터치: 손을 뗄 때 고르기(스크롤과 안 겹치게) · 길게 누르면 그 줄을 고르고, 그대로 끌면 지나간 줄도 같이 (끄는 동안 스크롤 막음)
+    function updateActions() {
+        const g = draft.find(x => x.id === sel);
+        count.textContent = tr`${selected.size} selected`;
+        putBtn.textContent = g ? tr`Put in "${g.name || tr`(no name)`}"` : tr`Pick a group on the left`;
+        putBtn.disabled = !g || !selected.size;
+        outBtn.disabled = !selected.size;
+        root.querySelector('.pf-be-actions').classList.toggle('pf-be-idle', !selected.size);
+    }
     let last = null, paint = null, press = null;
-    const rangeTo = (idx, on) => {
-        const [a, b] = [Math.min(last, idx), Math.max(last, idx)];
-        for (let i = a; i <= b; i++) if (!rows[i].hidden) setRow(rows[i], on);
-    };
+    const changed = () => updateActions();
+    const rangeTo = (idx, on) => { const [a, b] = [Math.min(last, idx), Math.max(last, idx)]; for (let i = a; i <= b; i++) if (!rows[i].hidden) setRow(rows[i], on); };
     list.addEventListener('pointerdown', ev => {
         const li = ev.target.closest('.pf-ed-row');
         if (!li || ev.button !== 0) return;
         const idx = rows.indexOf(li);
         if (ev.pointerType !== 'mouse') {
             press = { li, idx, x: ev.clientX, y: ev.clientY, long: false };
-            press.timer = setTimeout(() => {
-                if (!press) return;
-                press.long = true;
-                paint = !selected.has(li.dataset.id);
-                setRow(li, paint);
-                last = idx;
-                updateCount();
-                navigator.vibrate?.(12);
-            }, 450);
+            press.timer = setTimeout(() => { if (!press) return; press.long = true; paint = !selected.has(li.dataset.id); setRow(li, paint); last = idx; changed(); navigator.vibrate?.(12); }, 450);
             return;
         }
         ev.preventDefault();
         const on = !selected.has(li.dataset.id);
-        if (ev.shiftKey && last != null) rangeTo(idx, on);
-        else { setRow(li, on); paint = on; }
-        last = idx;
-        updateCount();
+        if (ev.shiftKey && last != null) rangeTo(idx, on); else { setRow(li, on); paint = on; }
+        last = idx; changed();
     });
     list.addEventListener('touchmove', ev => {
         if (!press?.long || paint === null) return;
         ev.preventDefault();
-        const t = ev.touches[0];
-        const li = document.elementFromPoint(t.clientX, t.clientY)?.closest?.('.pf-ed-row');
-        if (li && list.contains(li) && !li.hidden) { setRow(li, paint); updateCount(); }
+        const t = ev.touches[0], li = document.elementFromPoint(t.clientX, t.clientY)?.closest?.('.pf-ed-row');
+        if (li && list.contains(li) && !li.hidden) { setRow(li, paint); changed(); }
     }, { passive: false });
-    list.addEventListener('pointermove', ev => {
-        if (press?.long) return;
-        if (press && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > 8) { clearTimeout(press.timer); press = null; }
-    });
-    list.addEventListener('pointerup', () => {
-        if (!press) return;
-        clearTimeout(press.timer);
-        if (!press.long) {
-            setRow(press.li, !selected.has(press.li.dataset.id));
-            last = press.idx;
-            updateCount();
-        }
-        press = null;
-    });
+    list.addEventListener('pointermove', ev => { if (press && !press.long && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > 8) { clearTimeout(press.timer); press = null; } });
+    list.addEventListener('pointerup', () => { if (!press) return; clearTimeout(press.timer); if (!press.long) { setRow(press.li, !selected.has(press.li.dataset.id)); last = press.idx; changed(); } press = null; });
     list.addEventListener('pointercancel', () => { if (press && !press.long) { clearTimeout(press.timer); press = null; } });
     list.addEventListener('touchend', () => { if (press?.long) { press = null; paint = null; } });
     list.addEventListener('contextmenu', ev => { if (ev.target.closest('.pf-ed-row')) ev.preventDefault(); });
-    list.addEventListener('pointerover', ev => {
-        if (paint === null) return;
-        const li = ev.target.closest('.pf-ed-row');
-        if (li) { setRow(li, paint); updateCount(); }
-    });
+    list.addEventListener('pointerover', ev => { if (paint === null) return; const li = ev.target.closest('.pf-ed-row'); if (li) { setRow(li, paint); changed(); } });
     const stopPaint = () => { paint = null; };
     document.addEventListener('pointerup', stopPaint);
     list.addEventListener('click', ev => ev.preventDefault());
 
+    // 넣기 · 빼기: 고른 토글을 다른 그룹에서 빼고 고른 그룹에 (실제 순서대로)
+    function putInto(g) {
+        const ids = [...selected];
+        draft.forEach(x => { x.members = x.members.filter(id => !selected.has(id)); });
+        g.members = [...g.members, ...ids].sort((p, q) => (at.get(p) ?? 1e9) - (at.get(q) ?? 1e9));
+    }
+    const afterMove = () => { rows.forEach(li => setRow(li, false)); last = null; renderTree(); refreshTags(); refilter(); };
+    putBtn.addEventListener('click', () => { const g = draft.find(x => x.id === sel); if (!g || !selected.size) return; putInto(g); afterMove(); });
+    outBtn.addEventListener('click', () => { if (!selected.size) return; draft.forEach(x => { x.members = x.members.filter(id => !selected.has(id)); }); afterMove(); });
+    root.querySelector('.pf-be-clear').addEventListener('click', () => { rows.forEach(li => setRow(li, false)); changed(); });
+
     const search = root.querySelector('.pf-search input');
-    // 보기 거르기: 전체 / 이 그룹(하위 그룹 포함) / 그룹 없음 + 검색
-    const inThis = new Set(g ? tree.allItems(g) : []);
-    let filter = g && inThis.size ? 'mine' : 'all';
-    const refilter = () => {
+    let filter = 'all';
+    function refilter() {
         const q = search.value.trim().toLowerCase();
+        const g = draft.find(x => x.id === sel), mine = new Set(g ? tree().allItems(g) : []);
         rows.forEach((li, i) => {
             const id = order[i].id;
-            const okF = filter === 'all' || (filter === 'mine' ? (inThis.has(id) || selected.has(id)) : !groupOf.has(id) || (g && groupOf.get(id) === g));
+            const okF = filter === 'all' || (filter === 'mine' ? (sel === '' ? !groupOf(id) : mine.has(id)) : !groupOf(id));
             li.hidden = !okF || (!!q && !order[i].name.toLowerCase().includes(q));
         });
-        root.querySelectorAll('.pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.f === filter)));
-    };
-    root.querySelectorAll('.pf-ed-chip').forEach(c => c.addEventListener('click', () => { filter = c.dataset.f; refilter(); }));
+        root.querySelectorAll('.pf-be-filter .pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.f === filter)));
+    }
+    root.querySelectorAll('.pf-be-filter .pf-ed-chip').forEach(c => c.addEventListener('click', () => { filter = c.dataset.f; refilter(); }));
     search.addEventListener('input', refilter);
-    refilter();
-    root.querySelector('.pf-ed-all').addEventListener('click', () => { rows.forEach(li => { if (!li.hidden) setRow(li, true); }); updateCount(); });
-    root.querySelector('.pf-ed-none').addEventListener('click', () => { rows.forEach(li => setRow(li, false)); updateCount(); });
 
-    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Save`, cancelButton: tr`Cancel`, wider: true, allowVerticalScrolling: true });
+    // 자동 그룹: 그룹 없는 토글만 / 전부 새로 · AI로 다시 묶기 (결과는 이 편집기에 그대로)
+    if (auto) {
+        const paintMode = () => root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.m === mode)));
+        root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.addEventListener('click', () => { mode = c.dataset.m; draft = planToDraft(plan, mode, data.groups, nameOf); sel = null; paintMode(); renderTree(); refreshTags(); refilter(); }));
+        paintMode();
+        bindAiPickers(root);
+        const aiBtn = root.querySelector('.pf-auto-ai-run');
+        let running = null;
+        aiBtn.addEventListener('click', async () => {
+            const label = aiBtn.querySelector('span');
+            if (running) { running.abort(); return; }   // 다시 누르면 멈춤
+            if (!(await confirmAiSend(order.length))) return;
+            running = new AbortController();
+            const t0 = Date.now();
+            const tick = () => { label.textContent = tr`AI is grouping… ${Math.round((Date.now() - t0) / 1000)}s (click to stop)`; };
+            tick(); const timer = setInterval(tick, 1000);
+            aiBtn.classList.add('pf-busy');
+            try {
+                const next = await aiPlan(rawOrder, getPrompt, running.signal);
+                if (!next.length) { toastr.info(tr`AI found nothing to group.`, tr`Prompt Folders`); return; }
+                plan = next; mode = 'all'; paintMode();
+                draft = planToDraft(plan, mode, data.groups, nameOf); sel = null;
+                setSummary(tr`Grouped by AI. Fix names, move toggles, then create.`);
+                renderTree(); refreshTags(); refilter();
+            } catch (err) {
+                if (!running?.signal.aborted) toastr.error(`${tr`Regroup with AI`}: ${String(err?.message || err)}`, tr`Prompt Folders`);
+            } finally { clearInterval(timer); running = null; aiBtn.classList.remove('pf-busy'); label.textContent = tr`Regroup with AI`; }
+        });
+    }
+
+    renderTree(); refreshTags(); refilter();
+    if (addNew && sel) focusName(sel);
+    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: auto ? tr`Create` : tr`Save`, cancelButton: tr`Cancel`, wide: true, large: true, allowVerticalScrolling: true });
     document.removeEventListener('pointerup', stopPaint);
     if (!ok) return;
 
-    const name = root.querySelector('.pf-ed-name').value.trim() || (g?.name ?? tr`Group ${data.groups.length + 1}`);
-    const parent = root.querySelector('.pf-ed-parent').value || null;
-    const known = new Set(order.map(x => x.id));
-    const subtree = g ? [g, ...data.groups.filter(x => tree.isDescendant(x, g))] : [];
-    const had = new Set(subtree.flatMap(x => x.members));
-    // 새로 체크한 토글: 다른 그룹에서 빼고 이 그룹에 바로 넣음 (실제 순서대로)
-    const added = order.map(x => x.id).filter(id => selected.has(id) && !had.has(id));
-    const addSet = new Set(added);
-    data.groups.forEach(x => { if (!subtree.includes(x)) x.members = x.members.filter(id => !addSet.has(id)); });
-    // 체크를 푼 토글: 이 그룹(하위 포함)에서 뺌 — 지금 목록에 없는 기존 멤버는 그대로
-    subtree.forEach(x => { x.members = x.members.filter(id => selected.has(id) || !known.has(id)); });
-    if (g) {
-        g.name = name;
-        const at = new Map(order.map((x, i) => [x.id, i]));
-        g.members = [...g.members, ...added].sort((p, q) => (at.get(p) ?? 1e9) - (at.get(q) ?? 1e9));
-        g.parent = parent;
-    } else {
-        data.groups.push({ id: newId(), name, members: added, parent, collapsed: false });
+    // 빈 그룹(토글도 하위 그룹도 없음)은 버리고, 이름이 비면 안 토글 이름으로
+    const t = tree();
+    draft = draft.filter(g => t.allItems(g).length);
+    const t2 = makeTree(draft);
+    draft.forEach(g => { if (!String(g.name || '').trim()) { const ids = t2.allItems(g); g.name = nameOf(ids[1] ?? ids[0]) || tr`Group ${draft.indexOf(g) + 1}`; } });
+    if (auto && mode === 'all' && data.groups.length) {
+        const sure = await callGenericPopup(escapeHtml(tr`Remove the current ${data.groups.length} groups of this preset and regroup? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
+        if (!sure) return;
     }
-    if (parent) { const p = data.groups.find(x => x.id === parent); if (p) p.collapsed = false; }
+    const undo = structuredClone(data.groups);
+    data.groups = draft;
     settings().view = 'grouped';
     save();
     apply();
+    offerUndo(undo, auto ? tr`${draft.length} groups created.` : tr`Groups saved.`);
 }
 
 
