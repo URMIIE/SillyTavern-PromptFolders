@@ -472,3 +472,19 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be .pf-be-actions.pf-be-idle .menu_button.pf-be-put:disabled, .pf-be .pf-be-actions.pf-be-idle .menu_button { opacity: 0; visibility: hidden; }
 .pf-be .pf-be-actions .pf-be-hint, .pf-be .pf-be-actions .pf-ed-count, .pf-be .pf-be-actions .menu_button, .pf-be .pf-be-actions .pf-be-clear { font-size: 13px; line-height: 20px; }
 .pf-be .pf-be-actions .menu_button, .pf-be .pf-be-actions .pf-be-clear { padding-top: 4px; padding-bottom: 4px; display: inline-flex; align-items: center; }
+/* 그룹 머리 「택1」: 바로 눌러 켜고 끔 — 꺼진 그룹은 마우스를 올릴 때만 옅게(폰은 늘 옅게) */
+.pf-one { cursor: pointer; user-select: none; transition: opacity .15s ease, background-color .15s ease, color .15s ease; }
+.pf-one.pf-one-off { opacity: 0; border-style: dashed; }
+.pf-group-head:hover .pf-one.pf-one-off, .pf-one.pf-one-off:focus-visible { opacity: .55; }
+.pf-one.pf-one-off:hover { opacity: 1; }
+@media (hover: none) { .pf-one.pf-one-off { opacity: .35; } }
+/* 「택1」 알약은 아이콘 단추 크기(26px)를 따르지 않음 — 한 줄 글자 폭대로 */
+.pf-btn.pf-one { width: auto; height: auto; min-width: 0; padding: 0 8px; border-radius: 999px; white-space: nowrap; line-height: 1.6; font-size: .7em; color: var(--pf-muted); border: 1px solid var(--pf-line); }
+.pf-btn.pf-one:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent); color: var(--SmartThemeBodyColor); }   /* 켜진 모양은 예전 그대로(옅은 글자 · 얇은 테두리), 올렸을 때만 살짝 */
+@media (pointer: coarse) { .pf-btn.pf-one { padding: 2px 8px; } }
+/* 켜진 개수 칸 폭 고정(2/6 · 11/12 가 달라도 택1 · 스위치 자리가 같게) */
+.pf-group-head .pf-count { flex: none; min-width: 5.2ch; text-align: right; font-variant-numeric: tabular-nums; }
+/* 개수 칸은 가장 흔한 「11/22」 폭만, 택1 과 개수 사이는 4px */
+.pf-group-head .pf-count { min-width: 3.6ch; }   /* 「2/6」 · 「1/10」 폭 — 택1 을 붙일 만한 작은 그룹 기준(큰 그룹만 조금 밀림) */
+.pf-group-head .pf-one { margin-right: -2px; }
+.pf-group-head .pf-count { text-align: right; }   /* 숫자는 스위치 쪽(오른쪽)에 맞춤 */

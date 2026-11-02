@@ -750,7 +750,7 @@ function buildGroup(g, ctx, depth) {
         <span class="pf-caret fa-solid ${open ? 'fa-chevron-down' : 'fa-chevron-right'}"></span>
         ${subCount ? '<span class="pf-folder fa-solid fa-folder-tree"></span>' : ''}
         <span class="pf-name">${escapeHtml(g.name)}</span>
-        ${exclusive ? `<span class="pf-one" title="${escapeHtml(tr`Only one toggle in this group can be on`)}">${escapeHtml(tr`Pick 1`)}</span>` : ''}
+        <span class="pf-btn pf-one${exclusive ? '' : ' pf-one-off'}" role="button" tabindex="0" aria-pressed="${exclusive}" title="${escapeHtml(exclusive ? tr`Only one toggle in this group can be on. Click to turn off.` : tr`Click to allow only one toggle on in this group`)}">${escapeHtml(tr`Pick 1`)}</span>
         <span class="pf-count">${enabledCount}/${items.length}</span>
         ${exclusive
         ? `<span class="pf-btn pf-toggle-all fa-solid ${enabledCount ? 'fa-toggle-on' : 'fa-toggle-off pf-btn-idle'}" role="button" title="${escapeHtml(enabledCount ? tr`Turn the whole group off` : tr`Turn one toggle on from inside the group`)}"></span>`
@@ -770,6 +770,10 @@ function buildGroup(g, ctx, depth) {
         toggleAll(items, !allOn);
     });
     head.querySelector('.pf-more').addEventListener('click', e => openGroupMenu(g, e.currentTarget, range));
+    // 머리의 「택1」을 바로 눌러 켜고 끔 (편집 창 · 메뉴를 거치지 않음)
+    const one = head.querySelector('.pf-one');
+    one.addEventListener('click', () => setExclusive(g, !g.exclusive));
+    one.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExclusive(g, !g.exclusive); } });
 
     const body = document.createElement('ul');
     body.className = 'pf-group-body';
@@ -1650,17 +1654,33 @@ function setupExclusive() {
 }
 
 function setExclusive(g, on) {
+    // 되돌리기용: 택1 표시와 그룹 안 토글 켜짐 상태를 먼저 기억
+    const pm = promptManager;
+    const order = pm?.getPromptOrderForCharacter(pm.activeCharacter) || [];
+    const items = new Set(makeTree(presetData().groups).allItems(g));
+    const was = { exclusive: !!g.exclusive, enabled: new Map(order.filter(e => items.has(e.identifier)).map(e => [e.identifier, !!e.enabled])) };
     g.exclusive = on || undefined;
     if (!g.exclusive) delete g.exclusive;
     save();
+    let off = 0;
     if (on) {
         // 이미 여러 개가 켜져 있으면 실제 순서에서 첫 번째만 남김
-        const order = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter) || [];
-        const items = new Set(makeTree(presetData().groups).allItems(g));
         const first = order.find(e => e.enabled && items.has(e.identifier));
-        if (first && enforceExclusive(new Set(), first.identifier)) toastr.info(tr`Kept only "${promptManager.getPromptById(first.identifier)?.name ?? first.identifier}" on in this group.`, tr`Prompt Folders`);
+        if (first) off = enforceExclusive(new Set(), first.identifier);
     }
     apply();
+    const msg = on ? (off ? tr`"${g.name}" is now pick-one. Turned off ${off} other toggles.` : tr`"${g.name}" is now pick-one.`) : tr`"${g.name}" is no longer pick-one.`;
+    toastr.success(`${escapeHtml(msg)} <u>${escapeHtml(tr`Undo`)}</u>`, tr`Prompt Folders`, {
+        escapeHtml: false, timeOut: 10000, extendedTimeOut: 4000,
+        onclick: () => {
+            const cur = presetData().groups.find(x => x.id === g.id);
+            if (cur) { if (was.exclusive) cur.exclusive = true; else delete cur.exclusive; }
+            const now = pm.getPromptOrderForCharacter(pm.activeCharacter) || [];
+            now.forEach(e => { if (was.enabled.has(e.identifier)) e.enabled = was.enabled.get(e.identifier); });
+            pm.saveServiceSettings(); pm.render();
+            save(); apply();
+        },
+    });
 }
 
 // ---------------- 되돌리기 ----------------
