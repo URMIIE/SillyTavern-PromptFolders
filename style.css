@@ -68,6 +68,10 @@ body.pf-wrap-names #completion_prompt_manager #completion_prompt_manager_list .c
     --pf-line: color-mix(in srgb, var(--SmartThemeBodyColor) 16%, transparent);
     display: flex;
     align-items: center;
+    justify-content: flex-end;
+    flex: 1 1 100%;   /* 프롬프트 관리자 칸이 줄바꿈 flex 라 폭을 다 차지해야 오른쪽으로 감 */
+    width: 100%;
+    box-sizing: border-box;
     gap: 2px;
     margin: 2px 0 8px;
 }
@@ -163,7 +167,7 @@ body.pf-color-bar .pf-group-body { border-left-color: color-mix(in srgb, var(--p
 .pf-ed-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; font-size: .8em; color: var(--pf-muted); }
 .pf-ed-count { font-weight: 600; color: var(--SmartThemeBodyColor); font-variant-numeric: tabular-nums; }
 .pf-ed-list { list-style: none; margin: 0; padding: 0; max-height: min(52vh, 520px); overflow-y: auto; border: 1px solid var(--pf-line); border-radius: 8px; user-select: none; }
-.pf-ed-row { -webkit-touch-callout: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 10px; border-bottom: 1px solid var(--pf-line); cursor: pointer; }
+.pf-ed-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 10px; border-bottom: 1px solid var(--pf-line); cursor: pointer; }
 .pf-ed-row:last-child { border-bottom: 0; }
 .pf-ed-row:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent); }
 .pf-ed-row.pf-ed-sel { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 13%, transparent); }
@@ -219,14 +223,50 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-one { flex: none; padding: 0 6px; border-radius: 999px; font-size: .7em; line-height: 1.6; color: var(--pf-muted); border: 1px solid var(--pf-line); }
 .pf-btn-idle { opacity: .45; cursor: default; }
 /* 그룹이 없을 때 안내 */
-#completion_prompt_manager #completion_prompt_manager_list li.pf-empty { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; list-style: none; margin: 4px 0 8px; padding: 10px 12px; border: 1px dashed var(--pf-line); border-radius: 8px; color: var(--pf-muted); font-size: .9em; }
-.pf-empty-actions { display: flex; gap: 6px; }
-.pf-empty .pf-tb { all: unset; box-sizing: border-box; padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap; color: var(--pf-muted); }
-.pf-empty .pf-tb:hover { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent); }
-.pf-empty .pf-tb-primary { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 28%, transparent); font-weight: 600; }
 
 /* 그룹 안 토글(복사본)에도 끌기 손잡이 보이기 — 실리태번은 끌기 표시가 없는 줄의 손잡이를 숨김 */
-#completion_prompt_manager #completion_prompt_manager_list li.pf-clone .drag-handle { display: inline-block !important; cursor: grab; }
+/* 손잡이는 실리태번처럼 줄 왼쪽 칸에 (숫자·이름과 안 겹치게 줄 왼쪽에 자리를 비움) */
+#completion_prompt_manager #completion_prompt_manager_list li.pf-clone { position: relative; padding-left: 26px !important; }
+#completion_prompt_manager #completion_prompt_manager_list li.pf-clone .drag-handle { display: flex !important; cursor: grab; }
 #completion_prompt_manager #completion_prompt_manager_list li.pf-clone .prompt-manager-inspect-action { cursor: pointer; }
 #completion_prompt_manager #completion_prompt_manager_list .prompt-manager-inspect-action { -webkit-user-drag: none; }
 .pf-ed-row[hidden], .pf-auto-items[hidden] { display: none !important; }
+
+.pf-auto-items label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.pf-auto-items input[type=checkbox] { margin: 0; flex: none; }
+.pf-auto-items label:has(input:not(:checked)) span { text-decoration: line-through; opacity: .55; }
+
+
+.pf-auto-ai { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0 4px; }
+.pf-auto-ai .menu_button { display: inline-flex; align-items: center; gap: 6px; margin: 0; width: auto; padding: 5px 12px; }
+.pf-auto-ai-note { opacity: .65; font-size: .82em; flex: 1 1 180px; }
+.pf-auto-none { list-style: none; padding: 12px 10px; opacity: .75; }
+
+.pf-set-ai { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.pf-auto-ai .menu_button.pf-busy { opacity: .85; }
+
+/* AI 묶기 연결 고르기 */
+.pf-ai-conn { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+.pf-ai-modes { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 8px; background: color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent); width: fit-content; max-width: 100%; }
+.pf-ai-modes button { all: unset; box-sizing: border-box; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: .88em; opacity: .7; white-space: nowrap; }
+.pf-ai-modes button:hover { opacity: 1; }
+.pf-ai-modes button[aria-checked="true"] { opacity: 1; font-weight: 600; background: var(--SmartThemeBlurTintColor, rgba(127,127,127,.15)); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.pf-ai-modes button:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+.pf-ai-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.pf-ai-fields[hidden] { display: none !important; }
+.pf-ai-fields label { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: .85em; }
+.pf-ai-fields label > span { opacity: .7; }
+.pf-ai-fields select, .pf-ai-fields input { margin: 0; width: 100%; min-width: 0; box-sizing: border-box; }
+.pf-ai-fields input.pf-ai-custom { margin-top: 4px; }
+.pf-ai-fields input[hidden] { display: none !important; }
+.pf-ai-now { opacity: .7; }
+
+.pf-ai-notice { text-align: left; }
+.pf-ai-notice h3 { margin: 0 0 8px; }
+.pf-ai-notice ul { margin: 0 0 12px; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
+
+.pf-ai-fields label[hidden] { display: none !important; }
+.pf-ai-reload { all: unset; cursor: pointer; margin-left: 4px; opacity: .6; font-size: .9em; }
+.pf-ai-reload:hover { opacity: 1; }
+.pf-ai-reload[hidden] { display: none; }
+.pf-ai-reload.pf-spin i { animation: fa-spin 1s linear infinite; }

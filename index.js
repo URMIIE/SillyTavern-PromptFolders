@@ -21,7 +21,7 @@ const COLORS = ['#7b8cde', '#d9788a', '#4fae94', '#d99a55', '#a47fd1', '#4a9fc9'
 let observer = null;
 let applyTimer = null;
 
-const DEFAULTS = { presets: {}, view: 'grouped', showPos: true, wrapNames: true, syncPreset: true, colorStyle: 'dot', layout: 'real' };
+const DEFAULTS = { presets: {}, view: 'grouped', showPos: true, wrapNames: true, syncPreset: true, colorStyle: 'dot', layout: 'real', aiMode: 'chat', aiProfile: '', aiModel: '', aiSource: '', aiSourceModel: '', aiCustomUrl: '', aiNoticeOk: false };
 
 // ---------------- 화면 글자 (한국어) ----------------
 let KO = {};
@@ -177,6 +177,9 @@ function apply() {
     const list = document.getElementById(LIST_ID);
     if (!container || !list) return;
 
+    // 다시 그리는 동안 목록이 잠깐 짧아져 스크롤이 위로 밀리므로, 감싼 스크롤 칸 위치를 기억했다 되돌림
+    const scrolled = [];
+    for (let el = container.parentElement; el; el = el.parentElement) if (el.scrollTop) scrolled.push([el, el.scrollTop]);
     pause();
     try {
         cleanup(container);
@@ -211,18 +214,6 @@ function apply() {
 
         const data = presetData();
         const groups = data.groups;
-        if (!groups.length) {
-            const hint = document.createElement('li');
-            hint.className = 'pf-empty';
-            hint.innerHTML = `<span>${escapeHtml(tr`Group the toggles into folders to keep this list tidy.`)}</span>
-                <span class="pf-empty-actions">
-                    <button type="button" class="pf-tb pf-tb-primary pf-empty-auto">${escapeHtml(tr`Auto-group`)}</button>
-                    <button type="button" class="pf-tb pf-empty-new">${escapeHtml(tr`New group`)}</button>
-                </span>`;
-            hint.querySelector('.pf-empty-auto').addEventListener('click', autoGroup);
-            hint.querySelector('.pf-empty-new').addEventListener('click', () => createGroup(null));
-            rows[0]?.before(hint);
-        }
         const groupOf = new Map();
         groups.forEach((g, gi) => g.members.forEach(id => groupOf.set(id, { g, gi })));
 
@@ -266,6 +257,7 @@ function apply() {
         });
         anchor.remove();
     } finally {
+        for (const [el, top] of scrolled) el.scrollTop = top;
         resume();
     }
 }
@@ -674,10 +666,12 @@ function renderToolbar(list, groups) {
         const anyOpen = presetData().groups.some(g => !g.collapsed);
         bar.innerHTML = `
             ${ib('pf-new', 'fa-folder-plus', tr`New group`)}
+            ${groups.length ? '' : ib('pf-auto', 'fa-wand-magic-sparkles', tr`Auto-group`)}
             ${groups.length ? ib('pf-view', 'fa-list-ol', tr`Show in real order`, `aria-pressed="${view === 'original'}"`) : ''}
             ${groups.length && view !== 'original' ? ib('pf-fold', anyOpen ? 'fa-angles-up' : 'fa-angles-down', anyOpen ? tr`Collapse all` : tr`Expand all`) : ''}
             ${ib('pf-tools', 'fa-ellipsis', tr`Import / export groups`)}`;
         bar.querySelector('.pf-new').addEventListener('click', () => createGroup(null));
+        bar.querySelector('.pf-auto')?.addEventListener('click', autoGroup);
         bar.querySelector('.pf-tools').addEventListener('click', ev => openToolsMenu(ev.currentTarget));
         bar.querySelector('.pf-view')?.addEventListener('click', () => {
             settings().view = view === 'original' ? 'grouped' : 'original';
@@ -949,6 +943,47 @@ function findHeaders(order, getPrompt) {
     byText.forEach(ids => {
         if (ids.length === 2 && ids.some(id => decoShape(getPrompt(id).name).deco > 0) && ids.every(id => headers.has(id) || contentLen(getPrompt(id)) < 40)) ids.forEach(id => headers.set(id, Math.max(1, decoShape(getPrompt(id).name).deco)));
     });
+    // 같은 이모지로 시작하는 내용 없는 항목이 3개 넘게 이어지면(🚫 Never · 🚫 Gonna …) 구분선이 아니라 한 묶음
+    for (let i = 0; i < candidates.length;) {
+        const lead = graphemes(String(getPrompt(candidates[i]).name || '').trim())[0];
+        let j = i;
+        const weak = id => { const sh = decoShape(getPrompt(id).name); return sh.words > 0 && sh.maxRun < 3 && contentLen(getPrompt(id)) === 0; };
+        while (j < candidates.length && headers.has(candidates[j]) && weak(candidates[j]) && graphemes(String(getPrompt(candidates[j]).name || '').trim())[0] === lead) j++;
+        if (j - i >= 3) candidates.slice(i, j).forEach(id => headers.delete(id));
+        i = Math.max(j, i + 1);
+    }
+    // 이름 없는 빈 토글 = 구분선
+    headers.blank = new Set();
+    candidates.forEach(id => {
+        const p = getPrompt(id);
+        if (contentLen(p) === 0 && !graphemes(String(p.name || '')).some(g => isWordG(g) || isDecoG(g))) { headers.set(id, 0); headers.blank.add(id); }
+    });
+    // 시작 · 끝 짝: ⤵ … ⤴, <tag> … </tag>, start/시작 … end/끝 — 짝이 맞는 것만
+    headers.pairs = new Map(); headers.depth = new Map();
+    const stack = [];
+    const bare = n => String(n || '').replace(/[\u2934\u2935\uFE0F]/gu, '').trim();
+    const pairKey = n => lettersOnly(bare(n).replace(/\b(?:start|begin|end)\b|시작|종료|끝|开始|结束|開始|終了/gi, ''));
+    // 실리태번 기본 자리를 이름만 바꿔 끝 표시로 쓰는 프리셋도 있어서 짝은 목록 전체에서 찾음
+    for (const id of order.map(e => e.identifier).filter(id => getPrompt(id))) {
+        const n = String(getPrompt(id).name || ''), b = bare(n);
+        const close = /\u2934/u.test(n) || /^<\/[A-Za-z][\w-]*\s*>$/.test(b) || /\bend\b|종료|끝|结束|終了/i.test(b);
+        const open = !close && (/\u2935/u.test(n) || /^<[A-Za-z][\w-]*\b[^>]*>$/.test(b) || /\b(?:start|begin)\b|시작|开始|開始/i.test(b));
+        if (open) { headers.depth.set(id, stack.length); stack.push(id); continue; }
+        if (!close || !stack.length) continue;
+        let k = stack.length - 1;
+        while (k >= 0 && pairKey(getPrompt(stack[k]).name) !== pairKey(n)) k--;
+        if (k < 0 && /\u2934/u.test(n) && /\u2935/u.test(getPrompt(stack[stack.length - 1]).name)) k = stack.length - 1;
+        if (k < 0) continue;
+        headers.pairs.set(id, stack[k]);
+        stack.splice(k);
+    }
+    // 깊이는 짝이 맞은 구역끼리만 셈 (끝이 없는 「시작」은 무시)
+    const pos = new Map(order.map((e, i) => [e.identifier, i]));
+    const spans = [...headers.pairs].map(([c, o]) => [pos.get(o), pos.get(c), o]);
+    headers.depth.clear();
+    spans.forEach(([a, b, o]) => headers.depth.set(o, spans.filter(([x, y]) => x < a && y > b).length));
+    headers.depth.forEach((_, id) => headers.set(id, Math.max(headers.get(id) ?? 0, 1)));
+    headers.pairs.forEach((_, id) => headers.set(id, Math.max(headers.get(id) ?? 0, 1)));
     return headers;
 }
 
@@ -1010,7 +1045,16 @@ function betterRunName(name, members, nameOf) {
     return tail && graphemes(tail).filter(isWordG).length >= 2 ? `${name} ${tail}` : name;
 }
 
-/** 이름 앞부분이 같은 연속 묶음(3개 이상) */
+/** 이름 모양: 앞 장식·이모지를 떼고 「이름표:」 의 이름표 (예: '⛓️ 선택: 강압' → '선택'). 이름표가 없으면 '' */
+function labelKey(name) {
+    const gs = graphemes(String(name || '').trim());
+    let a = 0;
+    while (a < gs.length && !isWordG(gs[a])) a++;
+    const m = gs.slice(a).join('').match(/^([^:：]{1,20}?)\s*[:：]\s*\S/u);
+    return m && graphemes(m[1]).some(isWordG) ? m[1].trim() : '';
+}
+
+/** 이름 앞부분이 같은 연속 묶음(3개 이상) · 앞 이모지만 다르고 이름표가 같은 연속 묶음(2개 이상) */
 function nameRuns(ids, nameOf, minInSection = 0) {
     const runs = [];
     let i = 0;
@@ -1027,7 +1071,16 @@ function nameRuns(ids, nameOf, minInSection = 0) {
         }
         const name = runName(pre);
         const need = minInSection || (strongName(name) ? 2 : 3);
-        if (j - i >= need && usefulName(name)) { runs.push({ name: betterRunName(name, ids.slice(i, j), nameOf), members: ids.slice(i, j) }); i = j; } else i++;
+        if (j - i >= need && usefulName(name)) { runs.push({ name: betterRunName(name, ids.slice(i, j), nameOf), members: ids.slice(i, j) }); i = j; continue; }
+        const key = labelKey(nameOf(ids[i]));
+        let k = i + 1;
+        while (key && k < ids.length && !ST_MARKERS.has(ids[k]) && labelKey(nameOf(ids[k])) === key) k++;
+        if (k - i >= Math.max(2, minInSection)) { runs.push({ name: key, members: ids.slice(i, k) }); i = k; continue; }
+        // 끝말이 같은 연속 묶음(3개 이상): {{char}}'s PoV · Everyone's PoV · Shift PoV → PoV
+        const tailOf = names => runName(commonSuffix(names));
+        let t = i + 1;
+        while (t < ids.length && !ST_MARKERS.has(ids[t]) && graphemes(tailOf(ids.slice(i, t + 1).map(nameOf))).filter(isWordG).length >= 3) t++;
+        if (t - i >= Math.max(3, minInSection)) { runs.push({ name: tailOf(ids.slice(i, t).map(nameOf)), members: ids.slice(i, t) }); i = t; } else i++;
     }
     return runs;
 }
@@ -1035,9 +1088,10 @@ function nameRuns(ids, nameOf, minInSection = 0) {
 /** 묶음 계획: [{ name, members, children: [{ name, members }] }] — name 이 '' 이면 이름 없음 */
 function planAutoGroups(order, getPrompt) {
     const headers = findHeaders(order, getPrompt);
-    const nameOf = id => String(getPrompt(id)?.name ?? id).trim();
+    // 이름 비교에선 {{char}} 같은 매크로를 뺌
+    const nameOf = id => String(getPrompt(id)?.name ?? id).replace(/\{\{[^}]*\}\}/g, ' ').replace(/\s+/g, ' ').trim();
     // 장식 양이 두 무리로 뚜렷이 갈리면 두 단계 (큰 구역이 2개 이상이고 작은 구역보다 적을 때)
-    const vals = [...headers.values()].sort((a, b) => a - b);
+    const vals = [...headers].filter(([id]) => !headers.blank.has(id) && !headers.depth.has(id) && !headers.pairs.has(id)).map(([, v]) => v).sort((a, b) => a - b);
     let cut = Infinity;
     if (vals.length >= 4) {
         let best = 0;
@@ -1045,10 +1099,11 @@ function planAutoGroups(order, getPrompt) {
         const big = vals.filter(v => v >= cut).length;
         if (best < 2 || big < 2 || big >= vals.length - big) cut = Infinity;
     }
-    const isBig = id => cut === Infinity || headers.get(id) >= cut;
+    // 짝 구역: 바깥 짝은 큰 구역, 안쪽 짝 · 짝 구역 안의 다른 구분선은 하위 구역
+    const isBig = id => headers.depth.has(id) ? headers.depth.get(id) === 0 : !top?.pair && (headers.blank.has(id) || cut === Infinity || headers.get(id) >= cut);
 
-    const sections = [];
     let top = null, sub = null, loose = [];
+    const sections = [];
     const flushLoose = () => { if (loose.length) sections.push({ loose }); loose = []; };
     const sameText = (a, b) => { const t = lettersOnly(nameOf(a)); return !!t && t === lettersOnly(nameOf(b)); };
     for (const e of order) {
@@ -1057,11 +1112,18 @@ function planAutoGroups(order, getPrompt) {
             if (sub ?? top) (sub ?? top).members.push(id); else loose.push(id);
             continue;
         }
+        if (headers.pairs.has(id)) {
+            const opener = headers.pairs.get(id);
+            if (sub?.header === opener) { sub.members.push(id); sub = null; continue; }
+            if (top?.header === opener) { top.members.push(id); top = sub = null; continue; }
+            if (sub ?? top) (sub ?? top).members.push(id); else loose.push(id);
+            continue;
+        }
         if (sub && sameText(id, sub.header)) { sub.members.push(id); sub = null; continue; }
         if (top && sameText(id, top.header)) { top.members.push(id); top = sub = null; continue; }
         if (isBig(id) || !top) {
             flushLoose();
-            top = { header: id, members: [id], children: [] };
+            top = { header: id, members: [id], children: [], pair: headers.depth.has(id) };
             sections.push(top);
             sub = null;
         } else {
@@ -1071,14 +1133,26 @@ function planAutoGroups(order, getPrompt) {
     }
     flushLoose();
 
+    // 이름 없는 구역(빈 구분선)은 안의 토글 이름으로: 절반 넘게 덮는 묶음 이름 → 공통 끝말 → 없음
+    const real = ids => ids.filter(id => !headers.blank.has(id));
+    const titleOf = (header, ids) => {
+        const raw = headers.depth.has(header) ? nameOf(header).replace(/\b(?:start|begin)\b|시작|开始|開始/gi, ' ') : nameOf(header);
+        const t = headers.blank.has(header) ? '' : headerTitle(raw);
+        if (t) return t;
+        const body = real(ids.filter(id => id !== header));
+        const run = nameRuns(body, nameOf, 2).find(r => r.members.length * 2 > body.length);
+        if (run) return run.name;
+        const tail = runName(commonSuffix(body.map(nameOf)));
+        return graphemes(tail).filter(isWordG).length >= 3 ? tail : '';
+    };
     const out = [];
     for (const s of sections) {
         if (s.loose) {
             nameRuns(s.loose, nameOf).forEach(r => out.push({ name: r.name, members: r.members, children: [] }));
             continue;
         }
-        const children = s.children.filter(c => c.members.length > 1).map(c => ({ name: headerTitle(nameOf(c.header)), members: c.members }));
-        s.children.filter(c => c.members.length <= 1).forEach(c => s.members.push(...c.members));
+        const children = s.children.filter(c => real(c.members).length > 1).map(c => ({ name: titleOf(c.header, c.members), members: c.members }));
+        s.children.filter(c => real(c.members).length <= 1).forEach(c => s.members.push(...c.members));
         // 구분선 하나가 목록 대부분(절반 넘게)을 덮으면 큰 그룹은 쓸모가 없음 → 그 안의 묶음을 맨 위 그룹으로
         const size = s.members.length + children.reduce((n, c) => n + c.members.length, 0);
         if (order.length >= 20 && size > order.length * 0.5) {
@@ -1101,10 +1175,264 @@ function planAutoGroups(order, getPrompt) {
         }
         const inChildren = new Set(children.flatMap(c => c.members));
         const direct = s.members.filter(id => !inChildren.has(id));
-        if (direct.length + inChildren.size < 2) continue;
-        out.push({ name: headerTitle(nameOf(s.header)), members: direct, children });
+        if (real(direct).length + real([...inChildren]).length < 2) continue;
+        out.push({ name: titleOf(s.header, s.members), members: direct, children });
+    }
+    // 이름이 겹치면 뒤 그룹은 토글 앞 이모지(3가지 이하)를 붙이거나 번호를 붙임
+    const seen = new Map();
+    for (const n of out.flatMap(g => [g, ...g.children])) {
+        if (!n.name) continue;
+        const count = (seen.get(n.name) || 0) + 1;
+        seen.set(n.name, count);
+        if (count === 1) continue;
+        const leads = [...new Set(n.members.map(id => graphemes(nameOf(id))[0]).filter(g => /\p{Extended_Pictographic}|\p{RI}/u.test(g)))];
+        n.name = leads.length && leads.length <= 3 ? `${leads.join('')} ${n.name}` : `${n.name} ${count}`;
     }
     return out;
+}
+
+// AI 로 묶기: 토글 이름 · 내용 앞부분을 지금 연결된 API 로 한 번 보내 그룹 계획을 받음 (번호로 주고받아 이름이 바뀌어도 안전)
+const AI_GROUP_PROMPT = `You organise the prompt toggles of a SillyTavern preset into folders so a user can find them quickly.
+Input: one line per toggle — index | on/off | name. Only names are given, not the prompt text. Names may be decorated with symbols; markers like ⤵/⤴, start/end, <tag>/</tag> or blank names often open and close sections.
+Return ONLY JSON: {"groups":[{"name":"","items":[0,1],"children":[{"name":"","items":[2,3]}]}]}
+- Follow the preset's own sections when it has them; otherwise group by purpose (language, POV, style, pacing, NSFW, trackers, reasoning, jailbreak/system, etc.).
+- Put "pick one" alternatives together. Keep a section's opening and closing marker in that section's group.
+- Prefer neighbouring toggles; each index at most once; toggles that fit nowhere can stay out.
+- 4 to 14 top-level groups. children are optional sub-folders (at least 2 items each).
+- name: short Korean (2–12 characters) starting with one fitting emoji, e.g. "🌐 언어", "🎬 문체".`;
+
+/** 실리태번 연결 프로필 목록 (Connection Manager) */
+const aiProfiles = () => SillyTavern.getContext().extensionSettings.connectionManager?.profiles || [];
+/** 공급자 직접: 번역기와 같은 8개. 키는 실리태번 서버에 저장된 것을 서버가 붙임 */
+const PROVIDERS = [
+    ['openai', 'OpenAI'], ['custom', 'Custom (OpenAI-compatible)'], ['claude', 'Claude'], ['cohere', 'Cohere'],
+    ['makersuite', 'Google AI'], ['vertexai', 'Google Vertex AI'], ['openrouter', 'OpenRouter'], ['deepseek', 'DeepSeek'],
+];
+const providerName = id => { const p = PROVIDERS.find(x => x[0] === id); return p ? tr([p[1]]) : (document.querySelector(`#chat_completion_source option[value="${id}"]`)?.textContent.trim() || id); };
+// 실리태번이 공급자마다 기억하는 모델 (API 설정에서 고른 것)
+const MODEL_KEY = { openai: 'openai_model', custom: 'custom_model', claude: 'claude_model', cohere: 'cohere_model', makersuite: 'google_model', vertexai: 'vertexai_model', openrouter: 'openrouter_model', deepseek: 'deepseek_model' };
+// 목록을 주지 않는 공급자(Claude · Vertex)와 목록을 못 받았을 때 보여 줄 이름
+const KNOWN_MODELS = {
+    claude: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
+    vertexai: ['gemini-3.8-flash', 'gemini-4-argon', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    makersuite: ['gemini-3.8-flash', 'gemini-4-argon', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    openai: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6', 'gpt-5.5', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini'],
+    deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
+};
+const LISTABLE = new Set(['openai', 'custom', 'cohere', 'makersuite', 'openrouter', 'deepseek']);
+const modelCache = new Map();   // 공급자(+주소) → { ids, at } — 이 창에서 한 번 받으면 하루 동안
+const fetching = new Set();
+const failedAt = new Map();   // 목록을 못 받은 공급자 — 10분 동안은 저절로 다시 묻지 않음 (↻ 는 바로)
+const cacheKeyOf = source => source === 'custom' ? `custom@${customUrlOf()}` : source;
+const customUrlOf = () => String(settings().aiCustomUrl || SillyTavern.getContext().chatCompletionSettings?.custom_url || '').trim();
+function loadCache(key) {
+    if (modelCache.has(key)) return modelCache.get(key);
+    try { const v = JSON.parse(localStorage.getItem(`pf-ai-models:${key}`) || 'null'); if (v?.ids && Date.now() - v.at < 864e5) { modelCache.set(key, v); return v; } } catch { /* 없음 */ }
+    return null;
+}
+/** 실리태번 서버에 그 공급자의 모델 목록을 물음 (/status — 키는 서버가 붙임) */
+async function fetchModels(source) {
+    const key = cacheKeyOf(source);
+    if (!LISTABLE.has(source) || fetching.has(key)) return;
+    failedAt.delete(key);
+    fetching.add(key); fillAiPickers(document);
+    try {
+        const c = SillyTavern.getContext(), o = c.chatCompletionSettings || {};
+        const body = { chat_completion_source: source };
+        if (source === 'custom') Object.assign(body, { custom_url: customUrlOf(), custom_include_headers: o.custom_include_headers });
+        if (o.reverse_proxy && source === o.chat_completion_source) Object.assign(body, { reverse_proxy: o.reverse_proxy, proxy_password: o.proxy_password });
+        const res = await fetch('/api/backends/chat-completions/status', { method: 'POST', headers: c.getRequestHeaders(), body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data?.data?.data) ? data.data.data : Array.isArray(data?.models) ? data.models : [];
+        const ids = [...new Set(rows.map(m => String(m?.id ?? m?.name ?? '').replace(/^models\//, '')).filter(Boolean))].sort();
+        if (ids.length) { const v = { ids, at: Date.now() }; modelCache.set(key, v); try { localStorage.setItem(`pf-ai-models:${key}`, JSON.stringify(v)); } catch { /* 저장 못 해도 됨 */ } }
+        else failedAt.set(key, Date.now());
+    } catch (err) {
+        failedAt.set(key, Date.now());
+        console.warn('[Prompt Folders] model list', err);
+    } finally { fetching.delete(key); fillAiPickers(document); }
+}
+/** 고를 수 있는 모델: 받은 목록 → 없으면 알려진 이름 + 실리태번 API 화면 목록. current = API 설정에서 고른 모델 */
+function aiModelsOf(source) {
+    const o = SillyTavern.getContext().chatCompletionSettings || {};
+    const current = String(o[MODEL_KEY[source]] || '').trim();
+    const got = loadCache(cacheKeyOf(source));
+    if (!got && LISTABLE.has(source) && !(Date.now() - (failedAt.get(cacheKeyOf(source)) || 0) < 6e5)) fetchModels(source);
+    const sel = document.getElementById(`model_${source === 'makersuite' ? 'google' : source}_select`);
+    const page = sel ? [...sel.options].map(x => x.value).filter(v => v && !/^(custom|OR_Website)$/.test(v)) : [];
+    const list = got?.ids?.length ? got.ids : [...(KNOWN_MODELS[source] || []), ...page];
+    return { list: [...new Set(list)], current, loading: fetching.has(cacheKeyOf(source)) };
+}
+
+/** AI 요청 — 연결 방식: 지금 채팅 연결 / 연결 프로필(+모델) / 공급자 직접(+모델). 그룹 나누기는 깊이 생각할 일이 아니라 생각 수준은 낮게 */
+async function aiCall(system, prompt, signal) {
+    const c = SillyTavern.getContext(), s = settings();
+    const messages = [{ role: 'system', content: system }, { role: 'user', content: prompt }];
+    const o = c.chatCompletionSettings || {};
+    if (s.aiMode === 'profile') {
+        const profile = aiProfiles().find(p => p.id === s.aiProfile);
+        if (!profile) throw new Error(tr`Pick a connection profile.`);
+        if (!c.ConnectionManagerRequestService) throw new Error(tr`Turn on SillyTavern's Connection Manager extension.`);
+        const payload = { custom_prompt_post_processing: 'merge', reasoning_effort: 'low' };
+        if (String(s.aiModel || '').trim()) payload.model = String(s.aiModel).trim();
+        if (profile.api === 'vertexai') Object.assign(payload, { vertexai_auth_mode: o.vertexai_auth_mode || 'express', ...(o.vertexai_express_project_id ? { vertexai_express_project_id: o.vertexai_express_project_id } : {}) });
+        const res = await c.ConnectionManagerRequestService.sendRequest(profile.id, messages, 8192, { stream: false, signal, extractData: true, includePreset: true }, payload);
+        return String(res?.content ?? res ?? '');
+    }
+    let source = o.chat_completion_source, model = c.getChatCompletionModel?.();
+    if (s.aiMode === 'provider') {
+        source = s.aiSource || source;
+        model = String(s.aiSourceModel || '').trim() || aiModelsOf(source).current;
+        if (!model) throw new Error(tr`Pick a model.`);
+        if (source === 'custom' && !customUrlOf()) throw new Error(tr`Enter the server address.`);
+    } else if (c.mainApi !== 'openai' || !source) {
+        return String(await c.generateRaw({ systemPrompt: system, prompt, responseLength: 8192 }) || '');
+    }
+    const body = { chat_completion_source: source, model, messages, stream: false, temperature: 0.3, max_tokens: 8192, reasoning_effort: 'low' };
+    if (source === 'vertexai') Object.assign(body, { vertexai_auth_mode: o.vertexai_auth_mode || 'full', vertexai_region: o.vertexai_region || 'us-central1', vertexai_express_project_id: o.vertexai_express_project_id || '' });
+    if (source === 'custom') Object.assign(body, { custom_url: s.aiMode === 'provider' ? customUrlOf() : o.custom_url, custom_include_headers: o.custom_include_headers, custom_include_body: o.custom_include_body, custom_exclude_body: o.custom_exclude_body });
+    // 프록시는 채팅에 쓰는 공급자와 같을 때만 (다른 공급자에 엉뚱한 프록시가 붙지 않게)
+    if (o.reverse_proxy && source === o.chat_completion_source) Object.assign(body, { reverse_proxy: o.reverse_proxy, proxy_password: o.proxy_password });
+    const res = await fetch('/api/backends/chat-completions/generate', { method: 'POST', headers: c.getRequestHeaders(), body: JSON.stringify(body), signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error?.message || `${res.status}`);
+    return String(data.choices?.[0]?.message?.content ?? (data.candidates?.[0]?.content?.parts || []).filter(x => !x.thought).map(x => x.text || '').join(''));
+}
+
+/** 지금 고른 연결을 사람이 읽는 글로 */
+function aiTargetLabel() {
+    const s = settings(), c = SillyTavern.getContext();
+    const srcName = providerName;
+    if (s.aiMode === 'profile') {
+        const p = aiProfiles().find(x => x.id === s.aiProfile);
+        return tr`Connection profile "${p?.name || '?'}"` + (s.aiModel ? ` · ${s.aiModel}` : '');
+    }
+    if (s.aiMode === 'provider') return `${srcName(s.aiSource)} · ${s.aiSourceModel || aiModelsOf(s.aiSource).current}`;
+    const cur = c.chatCompletionSettings?.chat_completion_source;
+    return tr`Current chat connection` + (c.mainApi === 'openai' && cur ? ` (${srcName(cur)} · ${c.getChatCompletionModel?.() || ''})` : '');
+}
+
+/** 처음 쓸 때 무엇을 어디로 보내는지 알림 — 「다시 묻지 않기」 전까지 매번 */
+async function confirmAiSend(count) {
+    if (settings().aiNoticeOk) return true;
+    const e = escapeHtml, root = document.createElement('div');
+    root.className = 'pf-ai-notice';
+    root.innerHTML = `
+        <h3>${e(tr`Before grouping with AI`)}</h3>
+        <ul>
+            <li><b>${e(tr`Sent`)}</b> — ${e(tr`the names of ${count} toggles, with their order and on/off state.`)}</li>
+            <li><b>${e(tr`Not sent`)}</b> — ${e(tr`the prompt text inside the toggles, your chat, or anything else.`)}</li>
+            <li><b>${e(tr`Sent to`)}</b> — ${e(aiTargetLabel())}. ${e(tr`Nothing goes to the extension author or any other server.`)}</li>
+        </ul>
+        <label class="checkbox_label"><input type="checkbox" class="pf-ai-notice-ok"><span>${e(tr`Don't ask again`)}</span></label>`;
+    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Send`, cancelButton: tr`Cancel` });
+    if (ok && root.querySelector('.pf-ai-notice-ok').checked) { settings().aiNoticeOk = true; saveSettingsDebounced(); }
+    return !!ok;
+}
+
+// 연결 고르기 칸 (설정 화면 · 미리보기 창 공용): 방식 알약 3개 + 고른 방식의 칸만
+const aiPickersHtml = () => {
+    const e = escapeHtml;
+    return `<div class="pf-ai-conn">
+        <div class="pf-ai-modes" role="radiogroup" aria-label="${e(tr`Connection for AI grouping`)}">
+            <button type="button" role="radio" data-mode="chat">${e(tr`Current chat connection`)}</button>
+            <button type="button" role="radio" data-mode="profile">${e(tr`Connection profile`)}</button>
+            <button type="button" role="radio" data-mode="provider">${e(tr`Provider`)}</button>
+        </div>
+        <div class="pf-ai-fields" data-for="chat"><small class="pf-ai-now"></small></div>
+        <div class="pf-ai-fields" data-for="profile">
+            <label><span>${e(tr`Profile`)}</span><select class="text_pole pf-ai-profile"></select></label>
+            <label><span>${e(tr`Model`)}</span><select class="text_pole pf-ai-pick-model" data-key="aiModel"></select><input class="text_pole pf-ai-custom" data-key="aiModel" type="text" placeholder="${e(tr`Model name`)}" hidden></label>
+        </div>
+        <div class="pf-ai-fields" data-for="provider">
+            <label><span>${e(tr`Service`)}</span><select class="text_pole pf-ai-source"></select></label>
+            <label class="pf-ai-url-row"><span>${e(tr`Server address`)}</span><input class="text_pole pf-ai-url" type="text" placeholder="https://…/v1"></label>
+            <label><span>${e(tr`Model`)} <button type="button" class="pf-ai-reload" title="${e(tr`Reload model list`)}" aria-label="${e(tr`Reload model list`)}"><i class="fa-solid fa-rotate-right"></i></button></span><select class="text_pole pf-ai-pick-model" data-key="aiSourceModel"></select><input class="text_pole pf-ai-custom" data-key="aiSourceModel" type="text" placeholder="${e(tr`Model name`)}" hidden></label>
+        </div>
+    </div>`;
+};
+/** 모델 칸: 기본값 · 목록에서 고르기 · 「직접 입력…」(고르면 입력칸이 나옴) */
+const CUSTOM = '__custom__';
+function fillModel(host, key, list, defaultLabel, noDefault = false) {
+    const e = escapeHtml, value = String(settings()[key] || ''), sel = host.querySelector('.pf-ai-pick-model'), inp = host.querySelector('.pf-ai-custom');
+    const custom = !!value && !list.includes(value);
+    const typing = custom || sel.dataset.typing === '1';
+    sel.innerHTML = `<option value=""${noDefault ? ' disabled' : ''}>${e(defaultLabel)}</option>` + list.map(m => `<option value="${e(m)}">${e(m)}</option>`).join('') + `<option value="${CUSTOM}">${e(tr`Type a model name…`)}</option>`;
+    sel.value = typing ? CUSTOM : value;
+    inp.hidden = !typing;
+    if (document.activeElement !== inp) inp.value = custom ? value : '';
+}
+
+function fillAiPickers(root) {
+    const s = settings(), c = SillyTavern.getContext(), e = escapeHtml;
+    const current = c.chatCompletionSettings?.chat_completion_source;
+    const nameOfSource = providerName;
+    root.querySelectorAll('.pf-ai-conn').forEach(box => {
+        box.querySelectorAll('.pf-ai-modes button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.mode === s.aiMode)));
+        box.querySelectorAll('.pf-ai-fields').forEach(f => { f.hidden = f.dataset.for !== s.aiMode; });
+        box.querySelector('.pf-ai-now').textContent = c.mainApi === 'openai' && current ? tr`Now: ${nameOfSource(current)} · ${c.getChatCompletionModel?.() || ''}` : tr`Uses the API you chat with now.`;
+        const ps = box.querySelector('.pf-ai-profile'), profiles = aiProfiles();
+        ps.innerHTML = profiles.length ? profiles.map(p => `<option value="${e(p.id)}">${e(p.name || p.id)}</option>`).join('') : `<option value="">${e(tr`No connection profiles`)}</option>`;
+        if (!profiles.some(p => p.id === s.aiProfile)) s.aiProfile = profiles[0]?.id || '';
+        ps.value = s.aiProfile;
+        const prof = profiles.find(p => p.id === s.aiProfile);
+        fillModel(box.querySelector('[data-for="profile"]'), 'aiModel', prof?.api ? aiModelsOf(prof.api).list : [], prof?.model ? tr`Profile model (${prof.model})` : tr`Profile model`);
+        const ss = box.querySelector('.pf-ai-source');
+        ss.innerHTML = PROVIDERS.map(([id]) => `<option value="${e(id)}">${e(providerName(id))}</option>`).join('');
+        if (!PROVIDERS.some(x => x[0] === s.aiSource)) s.aiSource = PROVIDERS.some(x => x[0] === current) ? current : 'openai';
+        ss.value = s.aiSource;
+        const urlRow = box.querySelector('.pf-ai-url-row'), url = box.querySelector('.pf-ai-url');
+        urlRow.hidden = s.aiSource !== 'custom';
+        if (document.activeElement !== url) url.value = customUrlOf();
+        const models = aiModelsOf(s.aiSource), prov = box.querySelector('[data-for="provider"]');
+        const first = models.loading ? tr`Loading the model list…` : models.current ? tr`Selected in API settings (${models.current})` : tr`Pick a model`;
+        fillModel(prov, 'aiSourceModel', models.list, first, !models.current);
+        prov.querySelector('.pf-ai-reload').hidden = !LISTABLE.has(s.aiSource);
+        prov.querySelector('.pf-ai-reload').classList.toggle('pf-spin', models.loading);
+    });
+}
+function bindAiPickers(root) {
+    const set = (k, v) => { settings()[k] = v; saveSettingsDebounced(); fillAiPickers(document); };
+    root.querySelectorAll('.pf-ai-conn').forEach(box => {
+        box.querySelectorAll('.pf-ai-modes button').forEach(b => b.addEventListener('click', () => set('aiMode', b.dataset.mode)));
+        box.querySelector('.pf-ai-profile').addEventListener('change', ev => { settings().aiModel = ''; box.querySelector('[data-for="profile"] .pf-ai-pick-model').dataset.typing = ''; set('aiProfile', ev.target.value); });
+        box.querySelectorAll('.pf-ai-pick-model').forEach(sel => sel.addEventListener('change', () => {
+            const typing = sel.value === CUSTOM;
+            sel.dataset.typing = typing ? '1' : '';
+            set(sel.dataset.key, typing ? '' : sel.value);
+            if (typing) sel.parentElement.querySelector('.pf-ai-custom').focus();
+        }));
+        box.querySelectorAll('.pf-ai-custom').forEach(inp => inp.addEventListener('change', () => set(inp.dataset.key, inp.value.trim())));
+        box.querySelector('.pf-ai-url').addEventListener('change', ev => set('aiCustomUrl', ev.target.value.trim()));
+        box.querySelector('.pf-ai-reload').addEventListener('click', ev => { ev.preventDefault(); const k = cacheKeyOf(settings().aiSource); modelCache.delete(k); try { localStorage.removeItem(`pf-ai-models:${k}`); } catch { /* 없음 */ } fetchModels(settings().aiSource); });
+        box.querySelector('.pf-ai-source').addEventListener('change', ev => { settings().aiSourceModel = ''; box.querySelector('[data-for="provider"] .pf-ai-pick-model').dataset.typing = ''; set('aiSource', ev.target.value); });
+    });
+    fillAiPickers(root);
+}
+
+async function aiPlan(order, getPrompt, signal) {
+    const c = SillyTavern.getContext();
+    const ids = order.map(x => x.identifier).filter(id => getPrompt(id));
+    const lines = ids.map((id, i) => {
+        const p = getPrompt(id), on = order.find(x => x.identifier === id)?.enabled;
+        // 프롬프트 내용은 보내지 않음 (제작자 글 보호) — 이름만
+        return `${i} | ${on ? 'on' : 'off'} | ${String(p.name || '').trim() || '(no name)'}`;
+    });
+    const raw = await aiCall(AI_GROUP_PROMPT, lines.join('\n'), signal);
+    let rows;
+    try { rows = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)).groups; } catch { throw new Error(tr`Couldn't read the AI answer. Try again.`); }
+    const used = new Set();
+    const take = items => (Array.isArray(items) ? items : []).map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < ids.length && !used.has(i) && used.add(i)).map(i => ids[i]);
+    const plan = [];
+    for (const g of Array.isArray(rows) ? rows : []) {
+        const children = (Array.isArray(g?.children) ? g.children : []).map(k => ({ name: String(k?.name || '').trim().slice(0, 40), members: take(k?.items) })).filter(k => k.members.length >= 2);
+        const members = take(g?.items);
+        if (members.length + children.reduce((n, k) => n + k.members.length, 0) < 2) continue;
+        plan.push({ name: String(g?.name || '').trim().slice(0, 40), members, children });
+    }
+    const at = new Map(ids.map((id, i) => [id, i]));
+    const first = n => Math.min(...[...n.members, ...n.children.flatMap(k => k.members)].map(id => at.get(id)));
+    return plan.sort((a, b) => first(a) - first(b));
 }
 
 /** 자동 그룹: 계획을 미리보기 창에 보여 주고, 고른 것만 만듦 */
@@ -1114,23 +1442,22 @@ async function autoGroup() {
     const order = pm.getPromptOrderForCharacter(pm.activeCharacter) || [];
     const getPrompt = id => pm.getPromptById(id);
     const plan = planAutoGroups(order, getPrompt);
-    if (!plan.length) {
-        toastr.info(tr`Couldn't find anything to group automatically in this preset.`);
-        return;
-    }
     const data = presetData();
     const nameOf = id => String(getPrompt(id)?.name ?? id);
     const e = escapeHtml;
     let mode = data.groups.length ? 'free' : 'all';
     const picked = new Map();   // plan node → { on, name }
-    const nodes = plan.flatMap(g => [g, ...g.children]);
-    nodes.forEach(n => picked.set(n, { on: true, name: n.name }));
+    const resetPicked = () => { picked.clear(); plan.flatMap(g => [g, ...g.children]).forEach(n => picked.set(n, { on: true, name: n.name })); };
+    resetPicked();
+    const open = new Set();   // 펼쳐 둔 줄
+    const skip = new Set();   // 미리보기에서 체크를 푼 토글 — 어느 그룹에도 안 넣음
 
     const root = document.createElement('div');
     root.className = 'pf-editor pf-auto';
     root.innerHTML = `
         <h3 class="pf-ed-title">${e(tr`Auto-group preview`)}</h3>
         <div class="pf-ed-summary">${e(tr`Grouped by divider toggles and similar names. Untick what you don't want, fix names, then create.`)}</div>
+        <div class="pf-auto-ai"><button type="button" class="menu_button pf-auto-ai-run"><i class="fa-solid fa-wand-magic-sparkles"></i><span>${e(tr`Regroup with AI`)}</span></button><small class="pf-auto-ai-note">${e(tr`Sends only the toggle names (not their text) once to the chosen connection.`)}</small>${aiPickersHtml()}</div>
         <div class="pf-ed-filter" role="radiogroup">
             <button type="button" class="pf-ed-chip" data-m="free" role="radio">${e(tr`Only toggles not in a group`)}</button>
             <button type="button" class="pf-ed-chip" data-m="all" role="radio">${e(tr`Regroup everything`)}</button>
@@ -1142,26 +1469,34 @@ async function autoGroup() {
         const grouped = mode === 'free' ? new Set(data.groups.flatMap(g => g.members)) : new Set();
         return n.members.filter(id => !grouped.has(id));
     };
+    const keptFor = n => membersFor(n).filter(id => !skip.has(id));
     const render = () => {
         root.querySelectorAll('.pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.m === mode)));
-        list.innerHTML = '';
+        list.innerHTML = plan.length ? '' : `<li class="pf-auto-none">${e(tr`Couldn't find anything to group automatically in this preset.`)} ${e(tr`Try regrouping with AI.`)}</li>`;
         for (const g of plan) {
             const rowOf = (n, sub) => {
                 const st = picked.get(n);
                 const ids = membersFor(n);
-                const total = ids.length + (sub ? 0 : n.children.reduce((s, c) => s + (picked.get(c).on ? membersFor(c).length : 0), 0));
+                const total = keptFor(n).length + (sub ? 0 : n.children.reduce((s, c) => s + (picked.get(c).on ? keptFor(c).length : 0), 0));
                 const li = document.createElement('li');
                 li.className = 'pf-auto-row' + (sub ? ' pf-auto-sub' : '') + (st.on ? '' : ' pf-auto-off') + (total < 2 ? ' pf-auto-empty' : '');
                 li.innerHTML = `
                     <input type="checkbox" ${st.on && total >= 2 ? 'checked' : ''} ${total < 2 ? 'disabled' : ''} aria-label="${e(tr`Create this group`)}">
                     <input type="text" class="text_pole pf-auto-name" value="${e(st.name)}" placeholder="${e(tr`No name — e.g. ${nameOf(ids[1] ?? ids[0] ?? '')}`)}">
                     <button type="button" class="pf-auto-count" aria-expanded="false" title="${e(tr`Show toggles`)}">${total}<i class="fa-solid fa-chevron-down"></i></button>
-                    <ol class="pf-auto-items" hidden>${ids.map(id => `<li>${e(nameOf(id))}</li>`).join('')}</ol>`;
+                    <ol class="pf-auto-items" hidden>${ids.map(id => `<li><label><input type="checkbox" data-id="${e(id)}" ${skip.has(id) ? '' : 'checked'}><span>${e(nameOf(id))}</span></label></li>`).join('')}</ol>`;
                 li.querySelector('input[type=checkbox]').addEventListener('change', ev => { st.on = ev.target.checked; render(); });
+                li.querySelectorAll('.pf-auto-items input[data-id]').forEach(box => box.addEventListener('change', () => {
+                    if (box.checked) skip.delete(box.dataset.id); else skip.add(box.dataset.id);
+                    open.add(n);
+                    render();
+                }));
                 li.querySelector('.pf-auto-name').addEventListener('input', ev => { st.name = ev.target.value; });
+                if (open.has(n)) { li.querySelector('.pf-auto-items').hidden = false; li.querySelector('.pf-auto-count').setAttribute('aria-expanded', 'true'); }
                 li.querySelector('.pf-auto-count').addEventListener('click', ev => {
                     const ol = li.querySelector('.pf-auto-items');
                     ol.hidden = !ol.hidden;
+                    if (ol.hidden) open.delete(n); else open.add(n);
                     ev.currentTarget.setAttribute('aria-expanded', String(!ol.hidden));
                 });
                 return li;
@@ -1171,17 +1506,41 @@ async function autoGroup() {
         }
     };
     root.querySelectorAll('.pf-ed-chip').forEach(c => c.addEventListener('click', () => { mode = c.dataset.m; render(); }));
+    bindAiPickers(root);
+    const aiBtn = root.querySelector('.pf-auto-ai-run');
+    let running = null;
+    aiBtn.addEventListener('click', async () => {
+        const label = aiBtn.querySelector('span');
+        if (running) { running.abort(); return; }   // 다시 누르면 멈춤
+        if (!(await confirmAiSend(order.filter(x => getPrompt(x.identifier)).length))) return;
+        running = new AbortController();
+        const t0 = Date.now();
+        const tick = () => { label.textContent = tr`AI is grouping… ${Math.round((Date.now() - t0) / 1000)}s (click to stop)`; };
+        tick(); const timer = setInterval(tick, 1000);
+        aiBtn.classList.add('pf-busy');
+        try {
+            const next = await aiPlan(order, getPrompt, running.signal);
+            if (!next.length) { toastr.info(tr`AI found nothing to group.`); return; }
+            plan.splice(0, plan.length, ...next);
+            skip.clear(); open.clear(); resetPicked();
+            mode = 'all';
+            root.querySelector('.pf-ed-summary').textContent = tr`Grouped by AI. Untick what you don't want, fix names, then create.`;
+            render();
+        } catch (err) {
+            if (!running?.signal.aborted) toastr.error(String(err?.message || err), tr`Regroup with AI`);
+        } finally { clearInterval(timer); running = null; aiBtn.classList.remove('pf-busy'); label.textContent = tr`Regroup with AI`; }
+    });
     render();
 
     const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Create`, cancelButton: tr`Cancel`, wider: true, allowVerticalScrolling: true });
-    if (!ok) return;
+    if (!ok || !plan.length) return;
     const undo = structuredClone(data.groups);
     if (mode === 'all' && data.groups.length) {
         const sure = await callGenericPopup(escapeHtml(tr`Remove the current ${data.groups.length} groups of this preset and regroup? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
         if (!sure) return;
         data.groups = [];
     }
-    const taken = new Set(data.groups.flatMap(g => g.members));
+    const taken = new Set([...data.groups.flatMap(g => g.members), ...skip]);
     let made = 0;
     const nameFor = (n, ids) => (picked.get(n).name || '').trim() || nameOf(ids[1] ?? ids[0]).trim() || tr`Group ${data.groups.length + 1}`;
     for (const g of plan) {
@@ -1456,7 +1815,7 @@ async function openEditor(g, parentId) {
             ${g ? `<button type="button" class="pf-ed-chip" data-f="mine" role="radio">${e(tr`This group`)}</button>` : ''}
             <button type="button" class="pf-ed-chip" data-f="free" role="radio">${e(tr`Not in a group`)}</button>
         </div>
-        <div class="pf-ed-meta"><span class="pf-ed-count"></span><span class="pf-ed-hint">${e(tr`Range: Shift+click or long-press · drag to pick many`)}</span></div>
+        <div class="pf-ed-meta"><span class="pf-ed-count"></span><span class="pf-ed-hint">${e(matchMedia('(pointer: coarse)').matches ? tr`Pick many: long-press, then drag` : tr`Pick many: drag · Shift+click for a range`)}</span></div>
         <ul class="pf-ed-list" role="listbox" aria-multiselectable="true"></ul>`;
     const list = root.querySelector('.pf-ed-list');
     const count = root.querySelector('.pf-ed-count');
@@ -1483,7 +1842,7 @@ async function openEditor(g, parentId) {
     updateCount();
 
     // 마우스: 누르기 · Shift+클릭 범위 · 누른 채 끌어서 칠하기
-    // 터치: 손을 뗄 때 고르기(스크롤과 안 겹치게) · 길게 누르면 마지막으로 고른 줄부터 여기까지 범위
+    // 터치: 손을 뗄 때 고르기(스크롤과 안 겹치게) · 길게 누르면 그 줄을 고르고, 그대로 끌면 지나간 줄도 같이 (끄는 동안 스크롤 막음)
     let last = null, paint = null, press = null;
     const rangeTo = (idx, on) => {
         const [a, b] = [Math.min(last, idx), Math.max(last, idx)];
@@ -1498,8 +1857,8 @@ async function openEditor(g, parentId) {
             press.timer = setTimeout(() => {
                 if (!press) return;
                 press.long = true;
-                if (last != null) rangeTo(idx, selected.has(rows[last].dataset.id));
-                else setRow(li, true);
+                paint = !selected.has(li.dataset.id);
+                setRow(li, paint);
                 last = idx;
                 updateCount();
                 navigator.vibrate?.(12);
@@ -1513,7 +1872,15 @@ async function openEditor(g, parentId) {
         last = idx;
         updateCount();
     });
+    list.addEventListener('touchmove', ev => {
+        if (!press?.long || paint === null) return;
+        ev.preventDefault();
+        const t = ev.touches[0];
+        const li = document.elementFromPoint(t.clientX, t.clientY)?.closest?.('.pf-ed-row');
+        if (li && list.contains(li) && !li.hidden) { setRow(li, paint); updateCount(); }
+    }, { passive: false });
     list.addEventListener('pointermove', ev => {
+        if (press?.long) return;
         if (press && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > 8) { clearTimeout(press.timer); press = null; }
     });
     list.addEventListener('pointerup', () => {
@@ -1526,7 +1893,8 @@ async function openEditor(g, parentId) {
         }
         press = null;
     });
-    list.addEventListener('pointercancel', () => { if (press) { clearTimeout(press.timer); press = null; } });
+    list.addEventListener('pointercancel', () => { if (press && !press.long) { clearTimeout(press.timer); press = null; } });
+    list.addEventListener('touchend', () => { if (press?.long) { press = null; paint = null; } });
     list.addEventListener('contextmenu', ev => { if (ev.target.closest('.pf-ed-row')) ev.preventDefault(); });
     list.addEventListener('pointerover', ev => {
         if (paint === null) return;
@@ -1651,6 +2019,8 @@ async function addSettingsPanel() {
         ly.value = settings().layout || 'real';
         ly.addEventListener('change', () => { settings().layout = ly.value; saveSettingsDebounced(); apply(); });
     }
+    const aiHost = document.getElementById('pf_ai_host');
+    if (aiHost) { aiHost.innerHTML = aiPickersHtml(); bindAiPickers(aiHost); }
     const cs = document.getElementById('pf_colorStyle');
     if (cs) {
         cs.value = settings().colorStyle || 'dot';
