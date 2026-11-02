@@ -166,6 +166,8 @@ body.pf-color-bar .pf-group-body { border-left-color: color-mix(in srgb, var(--p
 }
 .pf-ed-bar .pf-search:focus-within { border-color: var(--SmartThemeQuoteColor); }
 .pf-ed-bar .pf-search input { flex: 1; min-width: 0; height: 100%; margin: 0; padding: 0; border: 0; outline: 0; background: transparent; box-shadow: none; color: var(--SmartThemeBodyColor); }
+/* 테마가 입력칸마다 테두리 · 바탕을 입혀도 검색칸 안쪽은 한 겹으로 */
+.pf-ed-bar .pf-search input:not(#pf_x):not(#pf_y):not(#pf_z) { margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; outline: 0 !important; background: transparent !important; box-shadow: none !important; height: 100% !important; min-height: 0 !important; width: auto !important; }
 .pf-editor .pf-tb { all: unset; box-sizing: border-box; flex: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; color: var(--pf-muted); white-space: nowrap; font-size: .9em; }
 .pf-editor .pf-tb:hover { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent); }
 .pf-ed-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; font-size: .8em; color: var(--pf-muted); }
@@ -309,7 +311,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be-actions .pf-ed-count { margin-right: auto; }
 .pf-be-actions.pf-be-idle > * { opacity: .6; }   /* 바탕은 그대로 — 막대 전체를 흐리면 아래 목록이 비쳐 보임 */
 .pf-ed-tag[hidden] { display: none; }
-@media (max-width: 720px) {
+@media (max-width: 900px) {
     .pf-be-panes { grid-template-columns: 1fr; }
     .pf-be-tree { max-height: 30vh; }
     .pf-be-items .pf-ed-list { max-height: 40vh; }
@@ -323,7 +325,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-ed-how[hidden] { display: none; }
 
 /* 좁은 화면: 고른 그룹만 아이콘을 보이고, 아이콘은 다음 줄로 → 이름 칸을 넓게 */
-@media (max-width: 720px) {
+@media (max-width: 900px) {
     .pf-be-actions { padding: 6px 8px; gap: 4px; }
     .pf-be-actions .menu_button { padding: 4px 10px; font-size: .9em; }
 }
@@ -370,7 +372,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be-actions.pf-be-idle { display: flex; background: transparent; box-shadow: none; color: var(--pf-muted); padding-left: 2px; }
 .pf-be-actions.pf-be-idle .menu_button, .pf-be-actions.pf-be-idle .pf-be-clear { visibility: hidden; }
 .pf-be-actions.pf-be-idle .pf-ed-count { font-weight: 400; }
-@media (max-width: 720px) { .pf-be-tree { flex: none; max-height: 40vh; } }
+@media (max-width: 900px) { .pf-be-tree { flex: none; max-height: 40vh; } }
 /* 고른 줄: 테두리 · 점 고리 없이 옅은 회색 바탕만 (사이드바 기본 모양), 마우스 올린 줄은 더 옅게 */
 .pf-be-g:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent); }
 .pf-be-g.pf-be-sel { background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent); box-shadow: none; }
@@ -389,7 +391,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be-items .pf-ed-list { flex: 1 1 0; min-height: 120px; max-height: none; }
 .pf-be-actions { flex: none; margin: 0; min-height: 40px; }
 .popup:has(.pf-be) .popup-content { overflow: visible; }
-@media (max-width: 720px) {
+@media (max-width: 900px) {
     .pf-be { height: auto; }
     .pf-be-items .pf-ed-list { flex: none; max-height: 45vh; }
     .popup:has(.pf-be) .popup-content { overflow: auto; }
@@ -435,7 +437,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
     outline: none !important;
 }
 /* 폰: 아이콘을 촘촘하게 해서 이름 칸을 넓게 */
-@media (max-width: 720px) {
+@media (max-width: 900px) {
     .pf-be-g { gap: 4px; padding: 5px 6px; }
     .pf-be-g .pf-be-ic { min-width: 26px; height: 30px; padding: 0 3px; font-size: .74em; }
     .pf-be-name.text_pole { padding-right: 8px; }
@@ -450,7 +452,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be-actions.pf-be-idle .pf-ed-count, .pf-be-actions.pf-be-idle .menu_button, .pf-be-actions.pf-be-idle .pf-be-clear { opacity: 0; pointer-events: none; }
 .pf-be-actions .menu_button.pf-be-put:disabled { background: transparent; color: color-mix(in srgb, var(--SmartThemeBlurTintColor) 70%, transparent); opacity: 1; }
 .pf-be-actions .pf-ed-count { overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 720px) { .pf-be-actions { flex-wrap: wrap; } .pf-be-actions .pf-be-hint { white-space: normal; right: 2px; } }
+@media (max-width: 900px) { .pf-be-actions { flex-wrap: wrap; } .pf-be-actions .pf-be-hint { white-space: normal; right: 2px; } }
 .pf-be-actions.pf-be-idle { padding: 6px 6px 6px 14px; }
 /* ── 동작 줄: 목록 위 한 줄(안 고르면 사용법, 고르면 개수 · 넣기 · 빼기 · 해제) — 따로 자리 · 색 막대 없음 ── */
 .pf-be .pf-be-actions, .pf-be .pf-be-actions.pf-be-idle {
@@ -471,7 +473,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be .pf-be-actions .pf-be-hint { opacity: 0; pointer-events: none; }
 .pf-be .pf-be-actions.pf-be-idle .pf-be-hint { opacity: 1; }
 .pf-be .pf-be-actions.pf-be-idle .pf-ed-count, .pf-be .pf-be-actions.pf-be-idle .menu_button, .pf-be .pf-be-actions.pf-be-idle .pf-be-clear { opacity: 0; pointer-events: none; }
-@media (max-width: 720px) {
+@media (max-width: 900px) {
     .pf-be .pf-be-actions, .pf-be .pf-be-actions.pf-be-idle { flex-wrap: wrap; row-gap: 4px; }
     .pf-be .pf-be-actions .pf-ed-count { flex-basis: 100%; }
     .pf-be .pf-be-actions.pf-be-idle .pf-ed-count, .pf-be .pf-be-actions.pf-be-idle .menu_button, .pf-be .pf-be-actions.pf-be-idle .pf-be-clear { display: none; }
