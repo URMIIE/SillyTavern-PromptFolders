@@ -134,7 +134,7 @@ body.pf-wrap-names #completion_prompt_manager #completion_prompt_manager_list .c
 body.pf-color-none .pf-name::before,
 body.pf-color-none .pf-tag::before { display: none; }
 body.pf-color-bar .pf-name::before { display: none; }
-body.pf-color-bar .pf-group-head { box-shadow: inset 3px 0 0 var(--pf-color); border-radius: 0 6px 6px 0; padding-left: 8px; }
+body.pf-color-bar .pf-group-head { box-shadow: inset 3px 0 0 var(--pf-color); border-radius: 0 6px 6px 0; }   /* 여백은 점·없음과 같게(글자 자리 그대로) */
 body.pf-color-bar .pf-group:not(.pf-sub) > .pf-group-head { background: color-mix(in srgb, var(--pf-color) 10%, transparent); }
 body.pf-color-bar .pf-group:not(.pf-sub) > .pf-group-head:hover { background: color-mix(in srgb, var(--pf-color) 16%, transparent); }
 body.pf-color-bar .pf-group-body { border-left-color: color-mix(in srgb, var(--pf-color) 45%, transparent); }
@@ -488,3 +488,5 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-group-head .pf-count { min-width: 3.6ch; }   /* 「2/6」 · 「1/10」 폭 — 택1 을 붙일 만한 작은 그룹 기준(큰 그룹만 조금 밀림) */
 .pf-group-head .pf-one { margin-right: -2px; }
 .pf-group-head .pf-count { text-align: right; }   /* 숫자는 스위치 쪽(오른쪽)에 맞춤 */
+/* 그룹 없이 보기: 모두 접기 단추는 자리만 남김(옆 단추가 밀리지 않게) */
+.pf-ib.pf-ib-gone { visibility: hidden; pointer-events: none; }

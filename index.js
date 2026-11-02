@@ -552,6 +552,7 @@ async function moveGroup(g, refId, before, parentId) {
     if (parent && (parent === g || tree.isDescendant(parent, g))) return;
     const mine = new Set(tree.allItems(g));
     if (refId && mine.has(refId)) return;
+    const snap = takeSnap();
     const order = pm.getPromptOrderForCharacter(pm.activeCharacter).slice();
     const idx = order.map((e, i) => (mine.has(e.identifier) ? i : -1)).filter(i => i >= 0);
     if (idx.length) {
@@ -574,6 +575,7 @@ async function moveGroup(g, refId, before, parentId) {
     save();
     pm.render();
     scheduleApply();
+    offerRestore(snap, tr`Moved the group "${g.name}".`);
 }
 
 /** 그룹 메뉴의 위로/아래로: 화면에서 바로 위·아래에 보이는 항목(토글이나 그룹)과 자리를 바꿈 */
@@ -667,8 +669,8 @@ function renderToolbar(list, groups) {
         bar.innerHTML = `
             ${ib('pf-new', 'fa-folder-plus', tr`New group`)}
             ${groups.length ? '' : ib('pf-auto', 'fa-wand-magic-sparkles', tr`Auto-group`)}
-            ${groups.length ? ib('pf-view', 'fa-list-ol', tr`Show in real order`, `aria-pressed="${view === 'original'}"`) : ''}
-            ${groups.length && view !== 'original' ? ib('pf-fold', anyOpen ? 'fa-angles-up' : 'fa-angles-down', anyOpen ? tr`Collapse all` : tr`Expand all`) : ''}
+            ${groups.length ? ib('pf-view', 'fa-list-ol', view === 'original' ? tr`Show with groups` : tr`Show without groups`, `aria-pressed="${view === 'original'}"`) : ''}
+            ${groups.length ? ib('pf-fold' + (view === 'original' ? ' pf-ib-gone' : ''), anyOpen ? 'fa-angles-up' : 'fa-angles-down', anyOpen ? tr`Collapse all` : tr`Expand all`, view === 'original' ? 'aria-hidden="true" tabindex="-1"' : '') : ''}
             ${ib('pf-tools', 'fa-ellipsis', tr`Import / export groups`)}`;
         bar.querySelector('.pf-new').addEventListener('click', () => createGroup(null));
         bar.querySelector('.pf-auto')?.addEventListener('click', autoGroup);
@@ -678,7 +680,7 @@ function renderToolbar(list, groups) {
             save();
             apply();
         });
-        bar.querySelector('.pf-fold')?.addEventListener('click', () => setAllCollapsed(anyOpen));
+        bar.querySelector('.pf-fold:not(.pf-ib-gone)')?.addEventListener('click', () => setAllCollapsed(anyOpen));
     }
     // 키보드: Enter/Space 로 누르기
     bar.querySelectorAll('[role="button"]').forEach(el => el.addEventListener('keydown', ev => {
@@ -766,8 +768,10 @@ function buildGroup(g, ctx, depth) {
     head.addEventListener('click', e => { if (!e.target.closest('.pf-btn')) toggleOpen(); });
     head.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); toggleOpen(); } });
     head.querySelector('.pf-toggle-all').addEventListener('click', () => {
-        if (exclusive) { if (enabledCount) toggleAll(items, false); return; }
+        const snap = takeSnap();
+        if (exclusive) { if (enabledCount) { toggleAll(items, false); offerRestore(snap, tr`Turned off "${g.name}".`); } return; }
         toggleAll(items, !allOn);
+        offerRestore(snap, allOn ? tr`Turned off "${g.name}".` : tr`Turned on all of "${g.name}".`);
     });
     head.querySelector('.pf-more').addEventListener('click', e => openGroupMenu(g, e.currentTarget, range));
     // 머리의 「택1」을 바로 눌러 켜고 끔 (편집 창 · 메뉴를 거치지 않음)
@@ -1456,11 +1460,11 @@ async function ungroupAll() {
     if (!data.groups.length) return;
     const ok = await callGenericPopup(escapeHtml(tr`Ungroup all ${data.groups.length} groups of this preset? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
     if (!ok) return;
-    const undo = structuredClone(data.groups);
+    const snap = takeSnap();
     data.groups = [];
     save();
     apply();
-    offerUndo(undo, tr`All groups were ungrouped.`);
+    offerRestore(snap, tr`All groups were ungrouped.`);
 }
 
 // ---------- 그룹 옮기기 (파일 · 다른 프리셋, 프리셋 새 버전으로) ----------
@@ -1648,17 +1652,16 @@ function setupExclusive() {
     // 토글 단추(원래 줄·그룹 안 복사본 모두)를 누르기 직전 상태를 기억했다가, 실리태번이 바꾼 뒤 비교
     document.addEventListener('click', e => {
         if (!e.target.closest?.('.prompt-manager-toggle-action')) return;
-        const before = enabledIds();
-        setTimeout(() => enforceExclusive(before), 0);
+        const before = enabledIds(), snap = takeSnap();
+        setTimeout(() => { const off = enforceExclusive(before); if (off) offerRestore(snap, tr`Pick-one group: turned off ${off} other toggles.`); }, 0);
     }, true);
 }
 
 function setExclusive(g, on) {
-    // 되돌리기용: 택1 표시와 그룹 안 토글 켜짐 상태를 먼저 기억
+    const snap = takeSnap();   // 되돌리기용
     const pm = promptManager;
     const order = pm?.getPromptOrderForCharacter(pm.activeCharacter) || [];
     const items = new Set(makeTree(presetData().groups).allItems(g));
-    const was = { exclusive: !!g.exclusive, enabled: new Map(order.filter(e => items.has(e.identifier)).map(e => [e.identifier, !!e.enabled])) };
     g.exclusive = on || undefined;
     if (!g.exclusive) delete g.exclusive;
     save();
@@ -1670,32 +1673,38 @@ function setExclusive(g, on) {
     }
     apply();
     const msg = on ? (off ? tr`"${g.name}" is now pick-one. Turned off ${off} other toggles.` : tr`"${g.name}" is now pick-one.`) : tr`"${g.name}" is no longer pick-one.`;
-    toastr.success(`${escapeHtml(msg)} <u>${escapeHtml(tr`Undo`)}</u>`, tr`Prompt Folders`, {
-        escapeHtml: false, timeOut: 10000, extendedTimeOut: 4000,
-        onclick: () => {
-            const cur = presetData().groups.find(x => x.id === g.id);
-            if (cur) { if (was.exclusive) cur.exclusive = true; else delete cur.exclusive; }
-            const now = pm.getPromptOrderForCharacter(pm.activeCharacter) || [];
-            now.forEach(e => { if (was.enabled.has(e.identifier)) e.enabled = was.enabled.get(e.identifier); });
-            pm.saveServiceSettings(); pm.render();
-            save(); apply();
-        },
-    });
+    if (off) offerRestore(snap, msg);   // 다른 토글을 껐을 때만(그 밖엔 「택1」을 다시 누르면 됨)
+    else toastr.success(escapeHtml(msg), tr`Prompt Folders`);
 }
 
 // ---------------- 되돌리기 ----------------
-function offerUndo(snapshot, message) {
-    const key = presetKey();
+/** 되돌리기용 상태: 이 프리셋의 실제 프롬프트 순서 · 켜짐 + 그룹 */
+function takeSnap() {
+    const pm = promptManager;
+    const order = pm?.activeCharacter ? (pm.getPromptOrderForCharacter(pm.activeCharacter) || []).map(e => ({ ...e })) : null;
+    return { key: presetKey(), order, groups: structuredClone(presetData().groups) };
+}
+
+function restoreSnap(snap) {
+    if (presetKey() !== snap.key) return toastr.warning(tr`The preset has changed, so this can't be undone.`, tr`Prompt Folders`);
+    const pm = promptManager;
+    if (snap.order && pm?.activeCharacter) {
+        pm.removePromptOrderForCharacter(pm.activeCharacter);
+        pm.addPromptOrderForCharacter(pm.activeCharacter, snap.order.map(e => ({ ...e })));
+        pm.saveServiceSettings();
+    }
+    settings().presets[snap.key] = { ...(settings().presets[snap.key] || {}), groups: structuredClone(snap.groups) };
+    save();
+    pm?.render?.();
+    apply();
+    toastr.info(tr`Undone.`, tr`Prompt Folders`);
+}
+
+/** 바꾼 뒤 알림 — 누르면 snap 으로 되돌림 */
+function offerRestore(snap, message) {
     toastr.success(`${escapeHtml(message)} <u>${escapeHtml(tr`Undo`)}</u>`, tr`Prompt Folders`, {
-        escapeHtml: false,
-        timeOut: 10000,
-        extendedTimeOut: 4000,
-        onclick: () => {
-            settings().presets[key] = { ...(settings().presets[key] || {}), groups: snapshot };
-            save();
-            apply();
-            toastr.info(tr`Restored the previous groups.`, tr`Prompt Folders`);
-        },
+        escapeHtml: false, timeOut: 10000, extendedTimeOut: 4000,
+        onclick: () => restoreSnap(snap),
     });
 }
 
@@ -1729,6 +1738,12 @@ function startEditing(g) {
     return openGroupEditor({ focusId: g.id });
 }
 
+/** 이름 앞의 이모지 · 기호(국기 · 변형 선택자 · ZWJ 포함)와 그 뒤 공백을 뗌 — 다 떼면 비는 이름은 그대로 */
+function plainName(name) {
+    const out = String(name || '').replace(/^(?:[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}][\uFE0F\u200D\u{1F3FB}-\u{1F3FF}]*)+\s*/u, '').trim();
+    return out || String(name || '');
+}
+
 /** 자동 그룹 계획(큰 그룹 → 작은 그룹, 최대 2단) → 편집기 초안 그룹. free 면 지금 그룹은 두고 그룹 없는 토글만 */
 function planToDraft(plan, mode, existing, nameOf) {
     const base = mode === 'free' ? structuredClone(existing) : [];
@@ -1740,7 +1755,7 @@ function planToDraft(plan, mode, existing, nameOf) {
         const kids = (n.children || []).map(c => ({ id: newId(), name: '', members: take(c.members), parent: top.id, collapsed: true, ...(c.exclusive ? { exclusive: true } : {}), _n: c })).filter(k => k.members.length);
         if (!top.members.length && !kids.length) continue;
         top.name = nameFor(n, top.members.length ? top.members : kids[0].members);
-        kids.forEach(k => { k.name = nameFor(k._n, k.members); delete k._n; });
+        kids.forEach(k => { k.name = plainName(nameFor(k._n, k.members)); delete k._n; });   // 2단계 폴더 이름엔 앞 이모지 없이
         base.push(top, ...kids);
     }
     return base;
@@ -2073,6 +2088,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         const sure = await callGenericPopup(escapeHtml(tr`Remove the current ${data.groups.length} groups of this preset and regroup? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
         if (!sure) return;
     }
+    const snap = takeSnap();
     // 그룹 안 순서를 바꿨으면 실제 순서도: 그 토글들이 있던 자리는 그대로 두고 그 안에서만 차례를 바꿈
     const moved = draft.filter(g => custom.has(g.id));
     if (moved.length) {
@@ -2088,23 +2104,24 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         pm.saveServiceSettings();
         pm.render();
     }
-    const undo = structuredClone(data.groups);
     data.groups = draft;
     settings().view = 'grouped';
     save();
     apply();
-    offerUndo(undo, imp ? tr`Groups imported.` : auto ? tr`${draft.length} groups created.` : tr`Groups saved.`);
+    offerRestore(snap, imp ? tr`Groups imported.` : auto ? tr`${draft.length} groups created.` : tr`Groups saved.`);
 }
 
 
 async function deleteGroup(g) {
     const ok = await callGenericPopup(`${escapeHtml(tr`Ungroup "${g.name}"?`)}<br><small>${escapeHtml(tr`The toggles inside are not deleted and stay where they are. Groups inside move up one level.`)}</small>`, POPUP_TYPE.CONFIRM);
     if (!ok) return;
+    const snap = takeSnap();
     const data = presetData();
     data.groups.forEach(x => { if (x.parent === g.id) x.parent = g.parent || null; });
     data.groups = data.groups.filter(x => x.id !== g.id);
     save();
     apply();
+    offerRestore(snap, tr`Ungrouped "${g.name}".`);
 }
 
 // ---------------- 감시 ----------------
