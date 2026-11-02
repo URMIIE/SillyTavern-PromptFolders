@@ -179,5 +179,9 @@
     "Bring groups": "가져오기",
     "by name": "이름으로 맞춤",
     "new toggle": "새 토글",
-    "Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.": "토글은 같은 번호로 먼저, 없으면 같은 이름으로 찾아요. 이 프리셋에 새로 생긴 토글은 바로 앞뒤 토글이 같은 그룹이면 그 안에 넣어요. 여기서 고친 뒤 가져오세요. 지금 프리셋의 그룹은 이걸로 바뀌어요."
+    "Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.": "토글은 같은 번호로 먼저, 없으면 같은 이름으로 찾아요. 이 프리셋에 새로 생긴 토글은 바로 앞뒤 토글이 같은 그룹이면 그 안에 넣어요. 여기서 고친 뒤 가져오세요. 지금 프리셋의 그룹은 이걸로 바뀌어요.",
+    "Every toggle is already in a group, so there is nothing to group. Pick \"Regroup everything\" to start over.": "모든 토글이 이미 그룹에 들어 있어서 묶을 토글이 없어요. 처음부터 다시 묶으려면 「전부 새로 묶기」를 고르세요.",
+    "No toggles left outside groups to group.": "그룹에 안 든 토글이 없어서 묶을 게 없어요.",
+    "No new groups to create, so nothing changed.": "새로 만들 그룹이 없어서 아무것도 바꾸지 않았어요.",
+    "Nothing changed.": "바뀐 게 없어요."
 }

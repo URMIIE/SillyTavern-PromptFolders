@@ -1761,14 +1761,20 @@ function plainName(name) {
 function planToDraft(plan, mode, existing, nameOf) {
     const base = mode === 'free' ? structuredClone(existing) : [];
     const taken = new Set(base.flatMap(g => g.members));
-    const take = ids => ids.filter(id => !taken.has(id) && taken.add(id));
+    const free = ids => ids.filter(id => !taken.has(id));
     const nameFor = (n, ids) => (n.name || '').trim() || String(nameOf(ids[1] ?? ids[0] ?? '') || '').trim() || tr`Group ${base.length + 1}`;
+    // 「그룹 없는 토글만」: 남은 토글이 1개뿐인 새 그룹 · 하위 그룹은 만들지 않음 (그 토글은 그룹 밖에 둠)
+    const least = mode === 'free' ? 2 : 1;
     for (const n of plan) {
-        const top = { id: newId(), name: '', members: take(n.members), parent: null, collapsed: true, ...(n.exclusive ? { exclusive: true } : {}) };
-        const kids = (n.children || []).map(c => ({ id: newId(), name: '', members: take(c.members), parent: top.id, collapsed: true, ...(c.exclusive ? { exclusive: true } : {}), _n: c })).filter(k => k.members.length);
-        if (!top.members.length && !kids.length) continue;
+        const kidsIn = (n.children || []).map(c => ({ c, members: [...new Set(free(c.members))] })).filter(k => k.members.length >= least);
+        const kidIds = new Set(kidsIn.flatMap(k => k.members));
+        const topMembers = [...new Set(free(n.members))].filter(id => !kidIds.has(id));
+        if (topMembers.length + kidIds.size < Math.max(least, 1)) continue;
+        if (!topMembers.length && !kidsIn.length) continue;
+        [...topMembers, ...kidIds].forEach(id => taken.add(id));
+        const top = { id: newId(), name: '', members: topMembers, parent: null, collapsed: true, ...(n.exclusive ? { exclusive: true } : {}) };
+        const kids = kidsIn.map(k => ({ id: newId(), name: plainName(nameFor(k.c, k.members)), members: k.members, parent: top.id, collapsed: true, ...(k.c.exclusive ? { exclusive: true } : {}) }));   // 2단계 폴더 이름엔 앞 이모지 없이
         top.name = nameFor(n, top.members.length ? top.members : kids[0].members);
-        kids.forEach(k => { k.name = plainName(nameFor(k._n, k.members)); delete k._n; });   // 2단계 폴더 이름엔 앞 이모지 없이
         base.push(top, ...kids);
     }
     return base;
@@ -1851,45 +1857,111 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     const count = root.querySelector('.pf-ed-count'), putBtn = root.querySelector('.pf-be-put'), outBtn = root.querySelector('.pf-be-out');
     const summary = root.querySelector('.pf-ed-summary');
     const setSummary = text => { summary.textContent = text; };
-    setSummary(imp ? tr`Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.` : auto ? (plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
+    const ungroupedCount = () => { const g = new Set(data.groups.flatMap(x => x.members)); return order.filter(x => !g.has(x.id)).length; };
+    const noneLeft = () => auto && mode === 'free' && !ungroupedCount();
+    setSummary(imp ? tr`Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.` : noneLeft() ? tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.` : auto ? (plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
 
     const tree = () => makeTree(draft);
     const groupOf = id => draft.find(g => g.members.includes(id)) || null;
     const depthOf = g => (tree().parentOf(g) ? 1 : 0);
     const firstAt = g => Math.min(1e9, ...tree().allItems(g).map(id => at.get(id) ?? 1e9));
+    // 그룹 순서: 처음엔 그룹 안 토글의 실제 위치 순 — 끌거나 위아래 단추로 바꾸면 그때부터 draft 배열 순서를 따름
+    let reordered = isCustomLayout();   // 「내가 정한 순서」 배치는 처음부터 배열 순서
+    const bySpot = (a, b) => reordered ? draft.indexOf(a) - draft.indexOf(b) : (firstAt(a) - firstAt(b) || draft.indexOf(a) - draft.indexOf(b));
+    const sibsOf = g => { const t = tree(), p = t.parentOf(g); return draft.filter(x => t.parentOf(x) === p).sort(bySpot); };
+    // 처음 순서를 바꿀 때: 지금 보이는 차례대로 draft 를 다시 늘어놓음 (그 뒤로는 배열 순서 = 보이는 순서)
+    const freeze = () => {
+        if (reordered) return;
+        const t = tree(), out = [];
+        const walk = g => { out.push(g); t.childrenOf(g).sort(bySpot).forEach(walk); };
+        draft.filter(g => !t.parentOf(g)).sort(bySpot).forEach(walk);
+        draft.forEach(g => { if (!out.includes(g)) out.push(g); });
+        draft = out;
+        reordered = true;
+    };
+    // g 를 같은 단계의 ref 앞(또는 뒤)으로
+    const placeGroup = (g, ref, after) => {
+        if (!g || !ref || g === ref) return;
+        freeze();
+        draft = draft.filter(x => x !== g);
+        const i = draft.indexOf(ref);
+        draft.splice(after ? i + 1 : i, 0, g);
+        renderTree();
+    };
+    const stepDraft = (g, dir) => {
+        const sibs = sibsOf(g), i = sibs.indexOf(g), j = i + dir;
+        if (j < 0 || j >= sibs.length) return void toastr.info(dir < 0 ? tr`Already at the top.` : tr`Already at the bottom.`, tr`Prompt Folders`);
+        placeGroup(g, sibs[j], dir > 0);
+    };
     const colorOf = g => { const t = tree(); return groupColor(g, t.indexOf(g), t); };
 
     function renderTree() {
         const t = tree();
-        const tops = draft.filter(g => !t.parentOf(g)).sort((a, b) => firstAt(a) - firstAt(b) || draft.indexOf(a) - draft.indexOf(b));
+        const tops = draft.filter(g => !t.parentOf(g)).sort(bySpot);
         // 직접 편집은 단계 제한 없음 — 깊이만큼 들여 씀
         const row = (g, depth) => {
             const n = t.allItems(g).length, top = !depth;
             return `<li class="pf-be-g${sel === g.id ? ' pf-be-sel' : ''}${top ? '' : ' pf-be-sub'}" data-g="${e(g.id)}" role="option" aria-selected="${sel === g.id}" style="--pf-color:${colorOf(g)};--pf-depth:${depth}">
+                <span class="pf-be-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span>
                 <span class="pf-be-dot"></span>
                 <input type="text" class="text_pole pf-be-name" value="${e(g.name)}" placeholder="${e(tr`Group name`)}" aria-label="${e(tr`Group name`)}">
                 <span class="pf-be-n">${n}</span>
+                <span class="pf-be-mv"><button type="button" class="pf-be-ic" data-act="up" title="${e(tr`Move group up`)}" aria-label="${e(tr`Move group up`)}"><i class="fa-solid fa-chevron-up"></i></button><button type="button" class="pf-be-ic" data-act="down" title="${e(tr`Move group down`)}" aria-label="${e(tr`Move group down`)}"><i class="fa-solid fa-chevron-down"></i></button></span>
                 <button type="button" class="pf-be-ic" data-act="sub" title="${e(tr`New group inside`)}" aria-label="${e(tr`New group inside`)}"><i class="fa-solid fa-folder-plus"></i></button>
                 <button type="button" class="pf-be-ic${g.exclusive ? ' on' : ''}" data-act="excl" title="${e(tr`Only one on`)}" aria-pressed="${!!g.exclusive}" aria-label="${e(tr`Only one on`)}">${e(tr`Pick 1`)}</button>
                 <button type="button" class="pf-be-ic" data-act="del" title="${e(tr`Ungroup`)}" aria-label="${e(tr`Ungroup`)}"><i class="fa-solid fa-xmark"></i></button>
             </li>`;
         };
         const free = order.filter(x => !groupOf(x.id)).length;
-        const branch = (g, depth, seen = new Set()) => seen.has(g) ? '' : (seen.add(g), row(g, depth) + t.childrenOf(g).sort((a, b) => firstAt(a) - firstAt(b)).map(k => branch(k, depth + 1, seen)).join(''));
+        const branch = (g, depth, seen = new Set()) => seen.has(g) ? '' : (seen.add(g), row(g, depth) + t.childrenOf(g).sort(bySpot).map(k => branch(k, depth + 1, seen)).join(''));
         treeEl.innerHTML = tops.map(g => branch(g, 0)).join('')
-            + `<li class="pf-be-g pf-be-none${sel === '' ? ' pf-be-sel' : ''}" data-g="" role="option" aria-selected="${sel === ''}"><span class="pf-be-dot"></span><span class="pf-be-label">${e(tr`Not in a group`)}</span><span class="pf-be-n">${free}</span></li>`;
+            + `<li class="pf-be-g pf-be-none${sel === '' ? ' pf-be-sel' : ''}" data-g="" role="option" aria-selected="${sel === ''}"><span class="pf-be-grip pf-be-grip-none"></span><span class="pf-be-dot"></span><span class="pf-be-label">${e(tr`Not in a group`)}</span><span class="pf-be-n">${free}</span></li>`;
         if (!draft.length) treeEl.insertAdjacentHTML('afterbegin', `<li class="pf-be-empty">${e(tr`No groups yet. Add one with + New group.`)}</li>`);
         updateActions();
     }
+    // 그룹 끌기: ☰ 손잡이를 잡고 같은 단계의 다른 그룹 위 · 아래로 (마우스 · 터치)
+    let gDrag = null;
+    treeEl.addEventListener('pointerdown', ev => {
+        const grip = ev.target.closest('.pf-be-grip'); if (!grip || grip.classList.contains('pf-be-grip-none')) return;
+        const li = grip.closest('[data-g]'); const g = draft.find(x => x.id === li?.dataset.g); if (!g) return;
+        ev.preventDefault();
+        grip.setPointerCapture?.(ev.pointerId);
+        gDrag = { g, li, target: null, after: false };
+        li.classList.add('pf-be-dragging');
+    });
+    treeEl.addEventListener('pointermove', ev => {
+        if (!gDrag) return;
+        treeEl.querySelectorAll('.pf-be-drop-before, .pf-be-drop-after').forEach(x => x.classList.remove('pf-be-drop-before', 'pf-be-drop-after'));
+        const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.pf-be-g[data-g]');
+        const sibs = sibsOf(gDrag.g);
+        const t = over && draft.find(x => x.id === over.dataset.g);
+        gDrag.target = t && t !== gDrag.g && sibs.includes(t) ? t : null;
+        if (!gDrag.target) return;
+        const r = over.getBoundingClientRect();
+        gDrag.after = ev.clientY > r.top + r.height / 2;
+        over.classList.add(gDrag.after ? 'pf-be-drop-after' : 'pf-be-drop-before');
+    });
+    const endGDrag = () => {
+        if (!gDrag) return;
+        const { g, target, after, li } = gDrag;
+        gDrag = null;
+        li.classList.remove('pf-be-dragging');
+        treeEl.querySelectorAll('.pf-be-drop-before, .pf-be-drop-after').forEach(x => x.classList.remove('pf-be-drop-before', 'pf-be-drop-after'));
+        if (target) placeGroup(g, target, after);
+    };
+    treeEl.addEventListener('pointerup', endGDrag);
+    treeEl.addEventListener('pointercancel', endGDrag);
     const focusName = id => setTimeout(() => treeEl.querySelector(`[data-g="${CSS.escape(id)}"] .pf-be-name`)?.focus(), 30);
     treeEl.addEventListener('input', ev => {
         const inp = ev.target.closest('.pf-be-name'); if (!inp) return;
         const g = draft.find(x => x.id === inp.closest('[data-g]').dataset.g); if (g) { g.name = inp.value; refreshTags(); updateActions(); }
     });
     treeEl.addEventListener('click', ev => {
+        if (ev.target.closest('.pf-be-grip')) return;   // 손잡이는 끌기 전용
         const li = ev.target.closest('[data-g]'); if (!li) return;
         const g = draft.find(x => x.id === li.dataset.g);
         const act = ev.target.closest('[data-act]')?.dataset.act;
+        if ((act === 'up' || act === 'down') && g) { stepDraft(g, act === 'up' ? -1 : 1); return; }
         if (act === 'sub' && g) { const k = addGroup(g.id); if (selected.size) putInto(k); renderTree(); refilter(); focusName(k.id); return; }
         if (act === 'excl' && g) { g.exclusive = !g.exclusive; const b = ev.target.closest('[data-act]'); b.classList.toggle('on', !!g.exclusive); b.setAttribute('aria-pressed', String(!!g.exclusive)); return; }   // 다시 그리지 않음(깜빡임 없게)
         if (act === 'del' && g) {
@@ -2049,7 +2121,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     // 자동 그룹: 그룹 없는 토글만 / 전부 새로 · AI로 다시 묶기 (결과는 이 편집기에 그대로)
     if (auto) {
         const paintMode = () => root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.m === mode)));
-        root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.addEventListener('click', () => { mode = c.dataset.m; draft = planToDraft(plan, mode, data.groups, nameOf); sel = null; paintMode(); renderTree(); refreshTags(); refilter(); }));
+        root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.addEventListener('click', () => { mode = c.dataset.m; draft = planToDraft(plan, mode, data.groups, nameOf); sel = null; paintMode(); if (noneLeft()) setSummary(tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.`); renderTree(); refreshTags(); refilter(); }));
         paintMode();
         bindAiPickers(root);
         const aiBtn = root.querySelector('.pf-auto-ai-run');
@@ -2057,16 +2129,20 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         aiBtn.addEventListener('click', async () => {
             const label = aiBtn.querySelector('span');
             if (running) { running.abort(); return; }   // 다시 누르면 멈춤
-            if (!(await confirmAiSend(order.length))) return;
+            // 「그룹 없는 토글만」이면 그룹에 없는 토글만 보내고 그것만 묶음 (기존 그룹은 그대로)
+            const grouped = new Set(mode === 'free' ? data.groups.flatMap(g => g.members) : []);
+            const sendOrder = rawOrder.filter(x => !grouped.has(x.identifier));
+            if (sendOrder.filter(x => getPrompt(x.identifier)).length < 2) return void toastr.info(mode === 'free' ? tr`No toggles left outside groups to group.` : tr`AI found nothing to group.`, tr`Prompt Folders`);
+            if (!(await confirmAiSend(sendOrder.filter(x => getPrompt(x.identifier)).length))) return;
             running = new AbortController();
             const t0 = Date.now();
             const tick = () => { label.textContent = tr`AI is grouping… ${Math.round((Date.now() - t0) / 1000)}s (click to stop)`; };
             tick(); const timer = setInterval(tick, 1000);
             aiBtn.classList.add('pf-busy');
             try {
-                const next = await aiPlan(rawOrder, getPrompt, running.signal);
+                const next = await aiPlan(sendOrder, getPrompt, running.signal);
                 if (!next.length) { toastr.info(tr`AI found nothing to group.`, tr`Prompt Folders`); return; }
-                plan = next; mode = 'all'; paintMode();
+                plan = next;   // 고른 방식(그룹 없는 토글만 / 전부 새로)은 그대로
                 draft = planToDraft(plan, mode, data.groups, nameOf); sel = null;
                 setSummary(tr`Grouped by AI. Fix names, move toggles, then create.`);
                 renderTree(); refreshTags(); refilter();
@@ -2097,6 +2173,11 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     draft = draft.filter(g => t.allItems(g).length);
     const t2 = makeTree(draft);
     draft.forEach(g => { if (!String(g.name || '').trim()) { const ids = t2.allItems(g); g.name = nameOf(ids[1] ?? ids[0]) || tr`Group ${draft.indexOf(g) + 1}`; } });
+    // 바뀐 게 하나도 없으면 저장하지 않음 (예: 모든 토글이 이미 그룹에 있는데 「그룹 없는 토글만」으로 만들기)
+    if (!custom.size && JSON.stringify(draft) === JSON.stringify(data.groups)) {
+        return void toastr.info(auto ? tr`No new groups to create, so nothing changed.` : tr`Nothing changed.`, tr`Prompt Folders`);
+    }
+    const madeNew = draft.filter(g => !data.groups.some(x => x.id === g.id)).length;
     if (auto && mode === 'all' && data.groups.length) {
         const sure = await callGenericPopup(escapeHtml(tr`Remove the current ${data.groups.length} groups of this preset and regroup? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
         if (!sure) return;
@@ -2117,11 +2198,45 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         pm.saveServiceSettings();
         pm.render();
     }
+    // 그룹 순서를 바꿨으면: 「내가 정한 순서」 배치는 배열 순서만, 「실제 순서」 배치는 프롬프트 순서에서도 그룹 덩어리 차례를 바꿈
+    // (그룹이 아닌 토글 자리는 그대로 두고, 그룹들이 있던 자리에 새 차례대로 채움 — 하위 그룹도 같은 방식)
+    if (reordered && !isCustomLayout()) {
+        const tf = makeTree(draft);
+        const arrange = (seq, gs) => {
+            const owner = new Map();
+            gs.forEach(g => tf.allItems(g).forEach(id => owner.set(id, g)));
+            const rest = [], anchors = [], blocks = new Map(gs.map(g => [g, []]));
+            for (const id of seq) {
+                const g = owner.get(id);
+                if (!g) { rest.push(id); continue; }
+                if (!blocks.get(g).length) anchors.push(rest.length);
+                blocks.get(g).push(id);
+            }
+            for (const g of gs) blocks.set(g, arrange(blocks.get(g), draft.filter(k => tf.parentOf(k) === g)));
+            const present = gs.filter(g => blocks.get(g).length);
+            const out = [];
+            let k = 0;
+            for (let i = 0; i <= rest.length; i++) {
+                while (k < present.length && anchors[k] === i) out.push(...blocks.get(present[k++]));
+                if (i < rest.length) out.push(rest[i]);
+            }
+            return out;
+        };
+        const cur = pm.getPromptOrderForCharacter(pm.activeCharacter).slice();
+        const ids = arrange(cur.map(x => x.identifier), draft.filter(g => !tf.parentOf(g)));
+        if (ids.join() !== cur.map(x => x.identifier).join()) {
+            const byId = new Map(cur.map(x => [x.identifier, x]));
+            pm.removePromptOrderForCharacter(pm.activeCharacter);
+            pm.addPromptOrderForCharacter(pm.activeCharacter, ids.map(id => byId.get(id)));
+            pm.saveServiceSettings();
+            pm.render();
+        }
+    }
     data.groups = draft;
     settings().view = 'grouped';
     save();
     apply();
-    offerRestore(snap, imp ? tr`Groups imported.` : auto ? tr`${draft.length} groups created.` : tr`Groups saved.`);
+    offerRestore(snap, imp ? tr`Groups imported.` : auto ? tr`${madeNew} groups created.` : tr`Groups saved.`);
 }
 
 
