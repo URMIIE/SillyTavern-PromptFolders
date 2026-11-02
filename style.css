@@ -1,6 +1,8 @@
 /* Prompt Folders — 프롬프트 관리자 그룹 */
 
 .pf-hidden { display: none !important; }
+/* 테마가 프롬프트 줄에 ID 선택자 + !important 로 display 를 걸어도 숨긴 원래 줄이 다시 보이지 않게 */
+html body #completion_prompt_manager #completion_prompt_manager_list > li.pf-hidden.pf-hidden.pf-hidden { display: none !important; }
 
 .pf-pos { display: inline-block; min-width: 1.8em; margin-right: 2px; font-size: .75em; opacity: .5; font-variant-numeric: tabular-nums; }
 
