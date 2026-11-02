@@ -1784,6 +1784,22 @@ function planToDraft(plan, mode, existing, nameOf) {
  * 그룹 편집기 (한 창): 왼쪽 그룹 목록(최대 2단 — 이름 고치기 · 하위 그룹 · 택1 · 지우기), 오른쪽 토글 목록(여러 개 골라 한 번에 넣기 · 빼기).
  * 그룹 만들기 · 그룹 편집 · 안에 새 그룹 · 자동으로 그룹 만들기가 모두 이 창을 씀. 저장(만들기)을 눌러야 반영, 반영 뒤 알림에서 되돌리기.
  */
+/** 편집기 높이를 창 안에 들어오게 줄임 — 확인 · 취소 단추가 창 몸통(.popup-body, 테마가 넘치면 숨김으로 둠) · 창 · 화면 아래 끝 안에 있게 */
+function fitEditorHeight(root) {
+    const popup = root.closest('.popup');
+    const body = popup?.querySelector('.popup-body');
+    const controls = popup?.querySelector('.popup-controls');
+    if (!popup || !controls) return;
+    root.style.height = '';
+    const bottomOf = (el) => { const cs = getComputedStyle(el); return el.getBoundingClientRect().bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom); };
+    for (let i = 0; i < 3; i++) {   // 줄이면 창도 같이 줄 수 있어 몇 번 다시 잼
+        const limit = Math.min(bottomOf(popup), body ? bottomOf(body) : Infinity, window.innerHeight - 6);
+        const over = controls.getBoundingClientRect().bottom - limit;
+        if (over <= 0.5) break;
+        root.style.height = Math.max(200, root.offsetHeight - over - 4) + 'px';
+    }
+}
+
 async function openGroupEditor({ focusId = null, addNew = false, newParent = null, auto = false, sources = null } = {}) {
     const pm = promptManager;
     if (!pm?.activeCharacter) return;
@@ -2164,7 +2180,12 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
 
     renderTree(); refreshTags(); refilter();
     if (addNew && sel) focusName(sel);
+    // 창 위아래에 장식 여백이 큰 테마나 낮은 화면에서는 「화면의 78%」 편집기가 창보다 커져 아래 단추가 창 테두리에 잘렸음 → 열린 뒤 남는 높이에 맞춤
+    const fit = () => fitEditorHeight(root);
+    setTimeout(fit, 0); setTimeout(fit, 250);
+    window.addEventListener('resize', fit);
     const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: imp ? tr`Bring groups` : auto ? tr`Create` : tr`Save`, cancelButton: tr`Cancel`, wide: true, large: true, allowVerticalScrolling: true });
+    window.removeEventListener('resize', fit);
     document.removeEventListener('pointerup', stopPaint);
     if (!ok) return;
 
@@ -2256,7 +2277,29 @@ async function deleteGroup(g) {
 
 function scheduleApply() {
     clearTimeout(applyTimer);
-    applyTimer = setTimeout(apply, 30);
+    applyTimer = setTimeout(() => { apply(); syncRowMetrics(); }, 30);
+}
+
+/** 그룹 머리 줄 높이를 테마의 프롬프트 줄(한 줄짜리) 높이에 맞춤 — 테마마다 31~51px 로 달라서 고정 34px 이면 튀었음 */
+const rowWatched = new WeakSet();
+let rowTimer = null;
+function syncRowMetrics() {
+    const list = document.getElementById(LIST_ID);
+    if (!list) return;
+    // 테마를 바꿀 때 프롬프트 창이 닫혀 있으면 잴 줄이 없음 → 목록이 보이거나 크기가 바뀌면 다시 잼 (실리태번이 목록을 새로 만들 수 있어 목록마다 한 번 붙임)
+    if (window.ResizeObserver && !rowWatched.has(list)) {
+        rowWatched.add(list);
+        new ResizeObserver(() => { clearTimeout(rowTimer); rowTimer = setTimeout(syncRowMetrics, 80); }).observe(list);
+    }
+    const heights = [];
+    // 그룹 안 줄은 원래 줄의 복사본(pf-clone)이라 data-pm-identifier 가 없음 — 보이는 프롬프트 줄이면 다 잼
+    for (const row of list.querySelectorAll('li.completion_prompt_manager_prompt:not(.completion_prompt_manager_list_head):not(.pf-hidden)')) {
+        const h = row.offsetHeight;
+        if (h) heights.push(h);
+        if (heights.length >= 12) break;
+    }
+    if (!heights.length) return;   // 모두 접혀 있으면 지난 값 그대로
+    list.style.setProperty('--pf-row-h', Math.min(...heights) + 'px');
 }
 
 function pause() {
@@ -2288,6 +2331,18 @@ function init() {
     });
     resume();
     apply();
+    syncRowMetrics();
+    // 테마를 바꾸면 줄 높이가 달라지므로 다시 잼
+    const themeCss = document.getElementById('custom-style');
+    if (themeCss) new MutationObserver(() => setTimeout(syncRowMetrics, 200)).observe(themeCss, { childList: true, characterData: true, subtree: true });
+    // 프롬프트 창(왼쪽 패널)을 열거나 탭을 바꿀 때도 다시 잼 — 테마를 바꿀 땐 창이 닫혀 있어 잴 줄이 없을 수 있음
+    document.addEventListener('click', (e) => {
+        if (e.target?.closest?.('#ai-config-button .drawer-toggle, #left-nav-panel .openai-tab-buttons, .pf-group-head')) {
+            setTimeout(syncRowMetrics, 150);
+            setTimeout(syncRowMetrics, 600);
+        }
+    }, true);
+
 }
 
 // ---------------- 설정 화면 ----------------

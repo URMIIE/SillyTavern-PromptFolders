@@ -11,7 +11,7 @@
 }
 .pf-group { list-style: none; margin: 0; }
 .pf-group:not(.pf-sub) + .pf-group:not(.pf-sub) { border-top: 1px solid var(--pf-line); }
-.pf-group-head { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 4px 3px 2px; border-radius: 6px; cursor: pointer; user-select: none; transition: background-color .12s; }
+.pf-group-head { display: flex; align-items: center; gap: 8px; min-height: var(--pf-row-h, 34px);  /* 테마의 프롬프트 줄 높이를 재서 맞춤(index.js syncRowMetrics) */ padding: 3px 4px 3px 2px; border-radius: 6px; cursor: pointer; user-select: none; transition: background-color .12s; }
 .pf-group-head:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent); }
 .pf-caret { flex: none; width: 14px; font-size: .62em; color: var(--pf-muted); text-align: center; }
 .pf-folder { display: none; }
@@ -111,8 +111,8 @@ body.pf-wrap-names #completion_prompt_manager #completion_prompt_manager_list .c
     align-items: center;
     justify-content: center;
     flex: none;
-    width: 30px;
-    height: 30px;
+    width: 2.15em;    /* 테마 글자 크기를 따라감 (예전 30px 고정) */
+    height: 2.15em;
     border-radius: 6px;
     color: var(--pf-muted);
     cursor: pointer;
@@ -125,8 +125,8 @@ body.pf-wrap-names #completion_prompt_manager #completion_prompt_manager_list .c
 
 
 @media (pointer: coarse) {
-    .pf-ib { width: 36px; height: 36px; }
-    .pf-toolbar > .pf-ib:last-child { width: 26px; }  /* 맨 끝 단추만 좁게 — 아이콘은 가운데 그대로, 오른쪽 끝이 위 줄과 거의 맞음 */
+    .pf-ib { width: 2.6em; height: 2.6em; }
+    .pf-toolbar > .pf-ib:last-child { width: 1.9em; }  /* 맨 끝 단추만 좁게 — 아이콘은 가운데 그대로, 오른쪽 끝이 위 줄과 거의 맞음 */
     .pf-toolbar .pf-search { height: 36px; }
     .pf-group-head { padding: 6px 8px; }
     .pf-btn { padding: 4px 6px; }
@@ -181,8 +181,9 @@ body.pf-color-bar .pf-group-body { border-left-color: color-mix(in srgb, var(--p
 .pf-ed-tag { flex: 0 1 auto; max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .74em; color: var(--pf-muted); }
 .pf-ed-tag::before { content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 5px 1px 0; border-radius: 50%; background: var(--pf-color); vertical-align: middle; }
 body.pf-color-none .pf-ed-tag::before { display: none; }
-.pf-set-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; }
-.pf-set-row select { width: auto; margin: 0; }
+.pf-set-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 6px; }
+.pf-set-row > span { flex: none; white-space: nowrap; }
+.pf-set-row select { width: auto; min-width: 0; max-width: 100%; flex: 0 1 auto; margin: 0; }
 @media (max-width: 600px) {
     .pf-ed-fields { grid-template-columns: 1fr; }
     .pf-ed-list { max-height: 50vh; }
@@ -249,8 +250,8 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 
 /* AI 묶기 연결 고르기 */
 .pf-ai-conn { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
-.pf-ai-modes { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 8px; background: color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent); width: fit-content; max-width: 100%; }
-.pf-ai-modes button { all: unset; box-sizing: border-box; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: .88em; opacity: .7; white-space: nowrap; }
+.pf-ai-modes { display: inline-flex; flex-wrap: nowrap; gap: 2px; padding: 2px; border-radius: 8px; background: color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent); width: fit-content; max-width: 100%; }
+.pf-ai-modes button { all: unset; box-sizing: border-box; padding: 5px 10px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; cursor: pointer; font-size: .88em; opacity: .7; white-space: nowrap; }
 .pf-ai-modes button:hover { opacity: 1; }
 .pf-ai-modes button[aria-checked="true"] { opacity: 1; background: var(--SmartThemeBlurTintColor, rgba(127,127,127,.15)); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
 .pf-ai-modes button:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
@@ -327,6 +328,8 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 /* 아이콘(안에 새 그룹 · 택1 · 풀기)은 고른 그룹에만 — 다른 줄은 개수가 오른쪽 끝에 붙음 */
 /* 그룹 편집기 창은 화면 폭을 넉넉히 (실리태번 넓은 창은 채팅 폭 = 화면 절반) */
 .popup:has(.pf-be) { width: min(1040px, 96vw); max-width: 96vw; min-width: 0; }
+/* 테마가 팝업 폭을 !important 로 막으면(좁은 화면 600px 등) 그룹 이름 칸이 한두 글자로 눌림 → 이 창만 넓게 (2026-11-03) */
+.popup.popup:has(.pf-be) { width: min(1040px, 96vw) !important; max-width: 96vw !important; }
 /* 편집기 「고른 그룹」 보기: ☰ 로 그룹 안 순서 바꾸기 */
 .pf-ed-grip { display: none; flex: none; width: 22px; text-align: center; color: var(--pf-muted); cursor: grab; touch-action: none; }
 .pf-be-reorder .pf-ed-direct .pf-ed-grip { display: inline-block; }
@@ -420,8 +423,9 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 @media (prefers-reduced-motion: reduce) { .pf-be-actions, .pf-be-actions *, .pf-be-g, .pf-be-g * { transition: none !important; } }
 @media (pointer: coarse) { .pf-be-g .pf-be-ic { opacity: .7; min-width: 28px; height: 28px; } }
 /* 테마가 입력칸 그림자 · 테두리를 !important 로 지워서 — 이 이름 칸만 되살림 */
-.pf-be .pf-be-name.text_pole:not(#pf_x) { border-color: transparent !important; box-shadow: none !important; }
-.pf-be .pf-be-g:hover .pf-be-name.text_pole, .pf-be .pf-be-sel .pf-be-name.text_pole { background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent) !important; }
+/* 바탕도: 테마가 입력칸을 흰 바탕 · 큰 둥근 모서리로 칠해 그룹 이름마다 흰 알약이 생겼음 → 평소엔 투명 (2026-11-03) */
+.pf-be .pf-be-name.text_pole:not(#pf_x) { border-color: transparent !important; box-shadow: none !important; background-color: transparent !important; border-radius: 6px !important; padding: 3px 6px !important; height: auto !important; min-height: 0 !important; }
+.pf-be :is(.pf-be-g:hover, .pf-be-sel) .pf-be-name.text_pole:not(#pf_x):not(:focus) { background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent) !important; }
 .pf-be .pf-be-name.text_pole:not(#pf_x):focus {   /* #pf_x: 테마 선택자(:not 여러 개)보다 우선 */
     background-color: var(--SmartThemeBlurTintColor) !important;
     border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 70%, transparent) !important;
@@ -514,3 +518,8 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be-g.pf-be-drop-before { box-shadow: inset 0 2px 0 var(--SmartThemeQuoteColor); }
 .pf-be-g.pf-be-drop-after { box-shadow: inset 0 -2px 0 var(--SmartThemeQuoteColor); }
 @media (pointer: coarse) { .pf-be-grip { width: 22px; opacity: .7; } .pf-be-g { grid-template-columns: 22px 10px minmax(0, 1fr) auto auto auto auto auto; } .pf-be-none { grid-template-columns: 22px 10px minmax(0, 1fr) auto; } }
+
+/* 그룹으로 보여 줄 때 「이름/토큰」 머리 아래 실리태번 빈 구분 줄이 테마에 따라 40px 넘게 비어 보였음 → 얇은 선만 (모든 테마, 2026-11-03) */
+#completion_prompt_manager_list:has(.pf-group) > .completion_prompt_manager_list_separator { height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; }
+#completion_prompt_manager_list:has(.pf-group) > .completion_prompt_manager_list_separator hr { margin: .3em 0 !important; }
+#completion_prompt_manager_list:has(.pf-group) > .completion_prompt_manager_list_head { margin-bottom: 0 !important; }
