@@ -891,6 +891,7 @@ function openToolsMenu(anchor) {
     sepE.className = 'pf-menu-sep';
     menu.append(sepE);
     item('fa-file-export', tr`Export groups`, exportGroups);
+    item('fa-code-branch', tr`Bring groups from another preset`, importFromPreset);
     item('fa-file-import', tr`Import groups`, importGroups);
     if (presetData().groups.length) {
         const sepU = document.createElement('div');
@@ -1454,8 +1455,70 @@ async function ungroupAll() {
     offerUndo(undo, tr`All groups were ungrouped.`);
 }
 
+// ---------- 그룹 옮기기 (파일 · 다른 프리셋, 프리셋 새 버전으로) ----------
+const nfcName = s => String(s ?? '').normalize('NFC').replace(/\s+/g, ' ').trim();
+
+/**
+ * 다른 곳의 그룹을 지금 프리셋에 맞춤. 토글은 ① 같은 id ② id 가 없으면 같은 이름(새 버전에서 다시 만든 토글)으로 찾고, 못 찾으면 뺌.
+ * 새 버전에만 있는 토글은 실제 순서에서 바로 앞 · 뒤 토글이 같은 그룹이면 그 그룹에 넣음. 택1 · 색 · 접힘 · 그룹 안 그룹은 그대로.
+ */
+function remapGroups(groups, srcNames = {}) {
+    const pm = promptManager;
+    const prompts = pm?.serviceSettings?.prompts || [];
+    const known = new Set(prompts.map(p => p.identifier));
+    const byName = new Map();
+    prompts.forEach(p => { const n = nfcName(p.name); if (n) byName.set(n, byName.has(n) ? null : p.identifier); });   // 같은 이름이 둘이면 이름으로는 안 맞춤
+    const stats = { kept: 0, byName: 0, missing: 0, placed: 0 };
+    const taken = new Set();
+    const out = structuredClone(groups).map(g => {
+        const members = [];
+        for (const id of g.members || []) {
+            let to = known.has(id) ? id : null;
+            if (to) stats.kept++;
+            else { const hit = byName.get(nfcName(srcNames[id])); if (hit) { to = hit; stats.byName++; } else stats.missing++; }
+            if (to && !taken.has(to)) { taken.add(to); members.push(to); }
+        }
+        return { id: g.id || newId(), name: String(g.name ?? ''), members, parent: g.parent || null, collapsed: !!g.collapsed, ...(g.color ? { color: g.color } : {}), ...(g.exclusive ? { exclusive: true } : {}) };
+    });
+    // 새 토글: 앞 · 뒤가 같은 그룹이면 그 안으로
+    const order = (pm?.getPromptOrderForCharacter(pm.activeCharacter) || []).map(e => e.identifier).filter(id => known.has(id));
+    const groupOf = id => out.find(g => g.members.includes(id));
+    order.forEach((id, i) => {
+        if (taken.has(id)) return;
+        let p = i - 1, n = i + 1;
+        while (p >= 0 && !taken.has(order[p])) p--;
+        while (n < order.length && !taken.has(order[n])) n++;
+        const gp = p >= 0 ? groupOf(order[p]) : null, gn = n < order.length ? groupOf(order[n]) : null;
+        if (gp && gp === gn) { gp.members.push(id); taken.add(id); stats.placed++; }
+    });
+    const at = new Map(order.map((id, i) => [id, i]));
+    out.forEach(g => g.members.sort((x, y) => (at.get(x) ?? 1e9) - (at.get(y) ?? 1e9)));
+    // 토글도 하위 그룹도 없는 그룹은 뺌
+    const tree = makeTree(out);
+    const kept = out.filter(g => tree.allItems(g).length);
+    stats.free = order.filter(id => !taken.has(id)).length;
+    return { groups: kept, stats };
+}
+
+/** 확인 글: 몇 개 그대로 · 이름으로 맞춤 · 없음 · 새 토글 넣음 */
+const remapSummary = (from, r) => tr`Bring ${r.groups.length} groups from "${from}" into "${presetKey()}"? The current groups of this preset are replaced.` + '\n'
+    + tr`${r.stats.kept} toggles matched · ${r.stats.byName} matched by name · ${r.stats.missing} not in this preset · ${r.stats.placed} new toggles placed next to their neighbors · ${r.stats.free} left outside groups`;
+
+async function applyRemap(from, r) {
+    const ok = await callGenericPopup(`<div style="text-align:left;white-space:pre-line">${escapeHtml(remapSummary(from, r))}</div>`, POPUP_TYPE.CONFIRM);
+    if (!ok) return;
+    const undo = structuredClone(presetData().groups);
+    presetData().groups = r.groups;
+    settings().view = 'grouped';
+    save();
+    apply();
+    offerUndo(undo, tr`Groups imported.`);
+}
+
 function exportGroups() {
-    const data = { type: 'prompt-folders', version: 1, preset: presetKey(), groups: presetData().groups };
+    // 토글 이름도 같이 — 프리셋 새 버전에서 id 가 바뀌어도 이름으로 찾게
+    const names = Object.fromEntries((promptManager?.serviceSettings?.prompts || []).map(p => [p.identifier, p.name || '']));
+    const data = { type: 'prompt-folders', version: 2, preset: presetKey(), groups: presetData().groups, names };
     const safe = presetKey().replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
     download(JSON.stringify(data, null, 2), `prompt-folders - ${safe}.json`, 'application/json');
 }
@@ -1467,27 +1530,40 @@ function importGroups() {
     input.addEventListener('change', async () => {
         const file = input.files?.[0];
         if (!file) return;
+        let json;
         try {
-            const json = JSON.parse(await getFileText(file));
+            json = JSON.parse(await getFileText(file));
             const groups = Array.isArray(json) ? json : json?.groups;
-            if (!Array.isArray(groups) || !groups.every(g => g && typeof g.id === 'string' && typeof g.name === 'string' && Array.isArray(g.members))) {
-                throw new Error('not a groups file');
-            }
-            const known = new Set((promptManager?.serviceSettings?.prompts || []).map(p => p.identifier));
-            const matched = groups.reduce((n, g) => n + g.members.filter(id => known.has(id)).length, 0);
-            const ok = await callGenericPopup(escapeHtml(tr`Replace the groups of "${presetKey()}" with ${groups.length} groups from the file? ${matched} items match this preset.`), POPUP_TYPE.CONFIRM);
-            if (!ok) return;
-            const undo = structuredClone(presetData().groups);
-            presetData().groups = structuredClone(groups).map(g => ({ id: g.id, name: g.name, members: g.members, parent: g.parent || null, collapsed: !!g.collapsed, ...(g.color ? { color: g.color } : {}) }));
-            save();
-            apply();
-            offerUndo(undo, tr`Groups imported.`);
+            if (!Array.isArray(groups) || !groups.every(g => g && typeof g.name === 'string' && Array.isArray(g.members))) throw new Error('not a groups file');
+            await applyRemap(json.preset || file.name, remapGroups(groups, json.names || {}));
         } catch (err) {
             console.warn('[Prompt Folders] import failed', err);
             toastr.error(tr`This file is not a Prompt Folders export.`, tr`Prompt Folders`);
         }
     });
     input.click();
+}
+
+/** 다른 프리셋(예: 예전 버전)의 그룹을 지금 프리셋으로 — 이름이 비슷한 프리셋이 먼저 */
+async function importFromPreset() {
+    const here = presetKey();
+    const stem = s => nfcName(s).toLowerCase().replace(/[\s_\-.]*v?\d+(?:\.\d+)*\s*$/i, '').replace(/[\d.]+/g, '').trim();
+    const list = Object.entries(settings().presets).filter(([k, v]) => nfcName(k) !== nfcName(here) && v?.groups?.length)
+        .map(([k, v]) => ({ k, n: v.groups.length, near: stem(k) && stem(k) === stem(here) }))
+        .sort((a, b) => (b.near - a.near) || (a.near ? b.k.localeCompare(a.k, undefined, { numeric: true }) : a.k.localeCompare(b.k)));   // 같은 이름 프리셋은 최신 버전 먼저
+    if (!list.length) return toastr.info(tr`No other preset has groups yet.`, tr`Prompt Folders`);
+    const e = escapeHtml;
+    const root = document.createElement('div');
+    root.className = 'pf-editor';
+    root.innerHTML = `<h3 class="pf-ed-title">${e(tr`Bring groups from another preset`)}</h3>
+        <div class="pf-ed-summary">${e(tr`Good for a new version of the same preset: toggles are matched by id, then by name. You'll see a summary before anything changes.`)}</div>
+        <select class="text_pole pf-from">${list.map(x => `<option value="${e(x.k)}">${x.near ? '★ ' : ''}${e(x.k)} — ${e(tr`${x.n} groups`)}</option>`).join('')}</select>`;
+    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Next`, cancelButton: tr`Cancel` });
+    if (!ok) return;
+    const from = root.querySelector('.pf-from').value;
+    let srcNames = {};
+    try { srcNames = Object.fromEntries((getPresetManager('openai')?.getCompletionPresetByName(from)?.prompts || []).map(p => [p.identifier, p.name || ''])); } catch { /* 이름 없이 id 로만 */ }
+    await applyRemap(from, remapGroups(settings().presets[from].groups, srcNames));
 }
 
 /** 그룹 색 고르기: 서로 어울리는 견본 10개 + 자동(이모지·차례) + 직접 고르기 */

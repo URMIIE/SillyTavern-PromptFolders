@@ -150,5 +150,12 @@
     "Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.": "왼쪽에서 그룹을 고르고, 오른쪽에서 토글을 골라 넣으세요. ＋로 그룹 안에 그룹을 몇 단계든 만들 수 있어요.",
     "Grouped by AI. Fix names, move toggles, then create.": "AI가 묶었어요. 이름을 고치고 토글을 옮긴 뒤 만들기를 누르세요.",
     "Groups saved.": "그룹을 저장했어요.",
-    "Edit all groups": "그룹 한꺼번에 편집"
+    "Edit all groups": "그룹 한꺼번에 편집",
+    "Bring ${0} groups from \"${1}\" into \"${2}\"? The current groups of this preset are replaced.": "「${1}」의 그룹 ${0}개를 「${2}」로 가져올까요? 지금 프리셋의 그룹은 바뀌어요.",
+    "${0} toggles matched · ${1} matched by name · ${2} not in this preset · ${3} new toggles placed next to their neighbors · ${4} left outside groups": "그대로 맞음 ${0}개 · 이름으로 맞춤 ${1}개 · 이 프리셋에 없음 ${2}개 · 새 토글을 옆 그룹에 넣음 ${3}개 · 그룹 밖에 남음 ${4}개",
+    "No other preset has groups yet.": "그룹이 있는 다른 프리셋이 아직 없어요.",
+    "Bring groups from another preset": "다른 프리셋에서 그룹 가져오기",
+    "Good for a new version of the same preset: toggles are matched by id, then by name. You'll see a summary before anything changes.": "프리셋 새 버전으로 옮길 때 좋아요. 토글은 같은 번호로 먼저, 없으면 같은 이름으로 찾아요. 바꾸기 전에 결과를 먼저 보여 드려요.",
+    "${0} groups": "그룹 ${0}개",
+    "Next": "다음"
 }
