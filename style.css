@@ -490,3 +490,10 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-group-head .pf-count { text-align: right; }   /* 숫자는 스위치 쪽(오른쪽)에 맞춤 */
 /* 그룹 없이 보기: 모두 접기 단추는 자리만 남김(옆 단추가 밀리지 않게) */
 .pf-ib.pf-ib-gone { visibility: hidden; pointer-events: none; }
+/* 프롬프트 목록이 패널 폭을 넘지 않게 — 내용 폭(그룹 머리 · 점 등)에 따라 늘어나 위 단추 줄까지 같이 넓어지던 것 */
+#completion_prompt_manager { min-width: 0; max-width: 100%; }
+/* 위 단추 줄과 목록 · 도구 줄의 양 끝을 같은 선에 */
+#completion_prompt_manager .completion_prompt_manager_footer { padding-left: 0; padding-right: 0; }
+/* 좁을 때 단추 줄이 왼쪽으로 삐져나가지 않게: 드롭다운은 줄어들고, 그래도 모자라면 다음 줄로 */
+#completion_prompt_manager .completion_prompt_manager_footer { flex-wrap: wrap !important; row-gap: 4px !important; }
+#completion_prompt_manager .completion_prompt_manager_footer > select { flex: 1 1 64px; min-width: 0; }   /* 한 줄에 들어가면 한 줄로(드롭다운이 먼저 줄어듦) */
