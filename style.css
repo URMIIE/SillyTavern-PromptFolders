@@ -402,6 +402,8 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be-g:hover .pf-be-name.text_pole, .pf-be-sel .pf-be-name.text_pole {
     background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.5 2.5l2 2L6 12H4v-2z'/%3E%3C/svg%3E");
+    /* 테마의 입력칸 background 줄임말이 반복 · 크기를 덮어써서 연필이 칸 가득 깔리던 것 */
+    background-repeat: no-repeat !important; background-position: right 8px center !important; background-size: 12px 12px !important;
 }
 /* 입력 중: 흰 칸 + 테마 강조색 테두리와 고리 */
 .pf-be-name.text_pole:focus, .pf-be-sel .pf-be-name.text_pole:focus {
