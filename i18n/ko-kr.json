@@ -157,5 +157,14 @@
     "Bring groups from another preset": "다른 프리셋에서 그룹 가져오기",
     "Good for a new version of the same preset: toggles are matched by id, then by name. You'll see a summary before anything changes.": "프리셋 새 버전으로 옮길 때 좋아요. 토글은 같은 번호로 먼저, 없으면 같은 이름으로 찾아요. 바꾸기 전에 결과를 먼저 보여 드려요.",
     "${0} groups": "그룹 ${0}개",
-    "Next": "다음"
+    "Next": "다음",
+    "Bring from": "가져올 곳",
+    "Drag to reorder": "끌어서 순서 바꾸기",
+    "Picked group: drag ☰ to change the order inside": "고른 그룹: ☰ 를 끌어 안의 순서를 바꿔요",
+    "Other versions of this preset": "같은 프리셋의 다른 버전",
+    "Other presets": "다른 프리셋",
+    "Bring groups": "가져오기",
+    "by name": "이름으로 맞춤",
+    "new toggle": "새 토글",
+    "Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.": "토글은 같은 번호로 먼저, 없으면 같은 이름으로 찾아요. 이 프리셋에 새로 생긴 토글은 바로 앞뒤 토글이 같은 그룹이면 그 안에 넣어요. 여기서 고친 뒤 가져오세요. 지금 프리셋의 그룹은 이걸로 바뀌어요."
 }

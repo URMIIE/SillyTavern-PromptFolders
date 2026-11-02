@@ -848,7 +848,11 @@ function placeMenu(menu, anchor) {
     const r = anchor.getBoundingClientRect();
     const mw = menu.offsetWidth, mh = menu.offsetHeight;
     const x = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw));
-    const y = r.bottom + 4 + mh <= window.innerHeight - 8 ? r.bottom + 4 : Math.max(8, r.top - mh - 4);
+    // 단추 바로 아래, 안 들어가면 바로 위 — 둘 다 모자라면 넓은 쪽에 붙이고 메뉴 안에서 스크롤 (화면 맨 위로 튀지 않게)
+    const below = window.innerHeight - r.bottom - 12, above = r.top - 12;
+    const down = mh <= below || (mh > above && below >= above);
+    if (mh > (down ? below : above)) { menu.style.maxHeight = (down ? below : above) + 'px'; menu.style.overflowY = 'auto'; }
+    const y = down ? r.bottom + 4 : r.top - 4 - Math.min(mh, above);
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
     setTimeout(() => document.addEventListener('pointerdown', onMenuOutside, true), 0);
@@ -891,8 +895,8 @@ function openToolsMenu(anchor) {
     sepE.className = 'pf-menu-sep';
     menu.append(sepE);
     item('fa-file-export', tr`Export groups`, exportGroups);
-    item('fa-code-branch', tr`Bring groups from another preset`, importFromPreset);
     item('fa-file-import', tr`Import groups`, importGroups);
+    item('fa-code-branch', tr`Bring groups from another preset`, importFromPreset);
     if (presetData().groups.length) {
         const sepU = document.createElement('div');
         sepU.className = 'pf-menu-sep';
@@ -1469,13 +1473,14 @@ function remapGroups(groups, srcNames = {}) {
     const byName = new Map();
     prompts.forEach(p => { const n = nfcName(p.name); if (n) byName.set(n, byName.has(n) ? null : p.identifier); });   // 같은 이름이 둘이면 이름으로는 안 맞춤
     const stats = { kept: 0, byName: 0, missing: 0, placed: 0 };
+    const how = {};   // 토글 id → 'name'(이름으로 맞춤) · 'placed'(새 토글을 옆 그룹에)
     const taken = new Set();
     const out = structuredClone(groups).map(g => {
         const members = [];
         for (const id of g.members || []) {
             let to = known.has(id) ? id : null;
             if (to) stats.kept++;
-            else { const hit = byName.get(nfcName(srcNames[id])); if (hit) { to = hit; stats.byName++; } else stats.missing++; }
+            else { const hit = byName.get(nfcName(srcNames[id])); if (hit) { to = hit; how[hit] = 'name'; stats.byName++; } else stats.missing++; }
             if (to && !taken.has(to)) { taken.add(to); members.push(to); }
         }
         return { id: g.id || newId(), name: String(g.name ?? ''), members, parent: g.parent || null, collapsed: !!g.collapsed, ...(g.color ? { color: g.color } : {}), ...(g.exclusive ? { exclusive: true } : {}) };
@@ -1489,7 +1494,7 @@ function remapGroups(groups, srcNames = {}) {
         while (p >= 0 && !taken.has(order[p])) p--;
         while (n < order.length && !taken.has(order[n])) n++;
         const gp = p >= 0 ? groupOf(order[p]) : null, gn = n < order.length ? groupOf(order[n]) : null;
-        if (gp && gp === gn) { gp.members.push(id); taken.add(id); stats.placed++; }
+        if (gp && gp === gn) { gp.members.push(id); taken.add(id); how[id] = 'placed'; stats.placed++; }
     });
     const at = new Map(order.map((id, i) => [id, i]));
     out.forEach(g => g.members.sort((x, y) => (at.get(x) ?? 1e9) - (at.get(y) ?? 1e9)));
@@ -1497,23 +1502,11 @@ function remapGroups(groups, srcNames = {}) {
     const tree = makeTree(out);
     const kept = out.filter(g => tree.allItems(g).length);
     stats.free = order.filter(id => !taken.has(id)).length;
-    return { groups: kept, stats };
+    return { groups: kept, stats, how };
 }
 
-/** 확인 글: 몇 개 그대로 · 이름으로 맞춤 · 없음 · 새 토글 넣음 */
-const remapSummary = (from, r) => tr`Bring ${r.groups.length} groups from "${from}" into "${presetKey()}"? The current groups of this preset are replaced.` + '\n'
-    + tr`${r.stats.kept} toggles matched · ${r.stats.byName} matched by name · ${r.stats.missing} not in this preset · ${r.stats.placed} new toggles placed next to their neighbors · ${r.stats.free} left outside groups`;
-
-async function applyRemap(from, r) {
-    const ok = await callGenericPopup(`<div style="text-align:left;white-space:pre-line">${escapeHtml(remapSummary(from, r))}</div>`, POPUP_TYPE.CONFIRM);
-    if (!ok) return;
-    const undo = structuredClone(presetData().groups);
-    presetData().groups = r.groups;
-    settings().view = 'grouped';
-    save();
-    apply();
-    offerUndo(undo, tr`Groups imported.`);
-}
+/** 맞춘 결과: 몇 개 그대로 · 이름으로 맞춤 · 없음 · 새 토글 넣음 */
+const remapStats = r => tr`${r.stats.kept} toggles matched · ${r.stats.byName} matched by name · ${r.stats.missing} not in this preset · ${r.stats.placed} new toggles placed next to their neighbors · ${r.stats.free} left outside groups`;
 
 function exportGroups() {
     // 토글 이름도 같이 — 프리셋 새 버전에서 id 가 바뀌어도 이름으로 찾게
@@ -1535,7 +1528,7 @@ function importGroups() {
             json = JSON.parse(await getFileText(file));
             const groups = Array.isArray(json) ? json : json?.groups;
             if (!Array.isArray(groups) || !groups.every(g => g && typeof g.name === 'string' && Array.isArray(g.members))) throw new Error('not a groups file');
-            await applyRemap(json.preset || file.name, remapGroups(groups, json.names || {}));
+            await openGroupEditor({ sources: [{ key: json.preset || file.name, label: json.preset || file.name, load: () => ({ groups, names: json.names || {} }) }] });
         } catch (err) {
             console.warn('[Prompt Folders] import failed', err);
             toastr.error(tr`This file is not a Prompt Folders export.`, tr`Prompt Folders`);
@@ -1552,18 +1545,8 @@ async function importFromPreset() {
         .map(([k, v]) => ({ k, n: v.groups.length, near: stem(k) && stem(k) === stem(here) }))
         .sort((a, b) => (b.near - a.near) || (a.near ? b.k.localeCompare(a.k, undefined, { numeric: true }) : a.k.localeCompare(b.k)));   // 같은 이름 프리셋은 최신 버전 먼저
     if (!list.length) return toastr.info(tr`No other preset has groups yet.`, tr`Prompt Folders`);
-    const e = escapeHtml;
-    const root = document.createElement('div');
-    root.className = 'pf-editor';
-    root.innerHTML = `<h3 class="pf-ed-title">${e(tr`Bring groups from another preset`)}</h3>
-        <div class="pf-ed-summary">${e(tr`Good for a new version of the same preset: toggles are matched by id, then by name. You'll see a summary before anything changes.`)}</div>
-        <select class="text_pole pf-from">${list.map(x => `<option value="${e(x.k)}">${x.near ? '★ ' : ''}${e(x.k)} — ${e(tr`${x.n} groups`)}</option>`).join('')}</select>`;
-    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Next`, cancelButton: tr`Cancel` });
-    if (!ok) return;
-    const from = root.querySelector('.pf-from').value;
-    let srcNames = {};
-    try { srcNames = Object.fromEntries((getPresetManager('openai')?.getCompletionPresetByName(from)?.prompts || []).map(p => [p.identifier, p.name || ''])); } catch { /* 이름 없이 id 로만 */ }
-    await applyRemap(from, remapGroups(settings().presets[from].groups, srcNames));
+    const namesOf = from => { try { return Object.fromEntries((getPresetManager('openai')?.getCompletionPresetByName(from)?.prompts || []).map(p => [p.identifier, p.name || ''])); } catch { return {}; } };   // 없으면 id 로만
+    await openGroupEditor({ sources: list.map(x => ({ key: x.k, label: `${x.k} — ${tr`${x.n} groups`}`, near: x.near, load: () => ({ groups: settings().presets[x.k].groups, names: namesOf(x.k) }) })) });
 }
 
 /** 그룹 색 고르기: 서로 어울리는 견본 10개 + 자동(이모지·차례) + 직접 고르기 */
@@ -1747,7 +1730,7 @@ function planToDraft(plan, mode, existing, nameOf) {
  * 그룹 편집기 (한 창): 왼쪽 그룹 목록(최대 2단 — 이름 고치기 · 하위 그룹 · 택1 · 지우기), 오른쪽 토글 목록(여러 개 골라 한 번에 넣기 · 빼기).
  * 그룹 만들기 · 그룹 편집 · 안에 새 그룹 · 자동으로 그룹 만들기가 모두 이 창을 씀. 저장(만들기)을 눌러야 반영, 반영 뒤 알림에서 되돌리기.
  */
-async function openGroupEditor({ focusId = null, addNew = false, newParent = null, auto = false } = {}) {
+async function openGroupEditor({ focusId = null, addNew = false, newParent = null, auto = false, sources = null } = {}) {
     const pm = promptManager;
     if (!pm?.activeCharacter) return;
     const data = presetData();
@@ -1761,17 +1744,32 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
 
     let plan = auto ? planAutoGroups(rawOrder, getPrompt) : [];
     let mode = data.groups.length ? 'free' : 'all';
-    let draft = auto ? planToDraft(plan, mode, data.groups, nameOf) : structuredClone(data.groups);
+    // 가져오기: 고른 곳의 그룹을 이 프리셋에 맞춘 결과로 시작 — 어떻게 맞췄는지 토글마다 표시
+    const imp = sources?.length ? sources : null;
+    let impSrc = imp?.[0], impRes = null;
+    // 같은 프리셋의 다른 버전(이름에서 버전 숫자만 다름)을 따로 묶어 위에
+    const impOptions = () => {
+        const opt = x => `<option value="${imp.indexOf(x)}">${e(x.label)}</option>`;
+        const near = imp.filter(x => x.near), rest = imp.filter(x => !x.near);
+        if (!near.length || !rest.length) return imp.map(opt).join('');
+        const head = t => `<option disabled>── ${e(t)} ──</option>`;   // optgroup 은 브라우저마다 글꼴이 달라서 보통 줄로
+        return head(tr`Other versions of this preset`) + near.map(opt).join('') + head(tr`Other presets`) + rest.map(opt).join('');
+    };
+    const runImport = () => { const s = impSrc.load(); impRes = remapGroups(s.groups, s.names); return impRes.groups; };
+    let draft = imp ? runImport() : auto ? planToDraft(plan, mode, data.groups, nameOf) : structuredClone(data.groups);
     let sel = focusId;   // 고른 그룹 (토글을 넣을 곳)
     const addGroup = parent => { const g = { id: newId(), name: '', members: [], parent, collapsed: false }; draft.push(g); sel = g.id; return g; };
     if (addNew) addGroup(newParent);
     const selected = new Set();   // 고른 토글
+    const custom = new Set();   // 안에서 순서를 직접 바꾼 그룹 id
 
     const root = document.createElement('div');
     root.className = 'pf-editor pf-be';
     root.innerHTML = `
-        <h3 class="pf-ed-title">${e(auto ? tr`Auto-group` : tr`Edit groups`)}</h3>
+        <h3 class="pf-ed-title">${e(imp ? tr`Bring groups from another preset` : auto ? tr`Auto-group` : tr`Edit groups`)}</h3>
         <div class="pf-ed-summary"></div>
+        ${imp ? `${imp.length > 1 ? `<select class="text_pole pf-imp-from" aria-label="${e(tr`Bring from`)}">${impOptions()}</select>` : ''}
+        <div class="pf-imp-stats"></div>` : ''}
         ${auto ? `<div class="pf-auto-ai"><button type="button" class="menu_button pf-auto-ai-run"><i class="fa-solid fa-wand-magic-sparkles"></i><span>${e(tr`Regroup with AI`)}</span></button><small class="pf-auto-ai-note">${e(tr`Sends only the toggle names (not their text) once to the chosen connection.`)}</small>${aiPickersHtml()}</div>
         <div class="pf-ed-filter pf-be-mode" role="radiogroup">
             <button type="button" class="pf-ed-chip" data-m="free" role="radio">${e(tr`Only toggles not in a group`)}</button>
@@ -1791,21 +1789,21 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
                     <button type="button" class="pf-ed-chip" data-f="mine" role="radio">${e(tr`Picked group`)}</button>
                     <button type="button" class="pf-ed-chip" data-f="free" role="radio">${e(tr`Not in a group`)}</button>
                 </div>
-                <div class="pf-ed-meta"><span class="pf-ed-hint">${e(matchMedia('(pointer: coarse)').matches ? tr`Pick many: long-press, then drag` : tr`Pick many: drag · Shift+click for a range`)}</span></div>
-                <ul class="pf-ed-list" role="listbox" aria-multiselectable="true"></ul>
                 <div class="pf-be-actions">
+                    <span class="pf-be-hint">${e(matchMedia('(pointer: coarse)').matches ? tr`Pick many: long-press, then drag` : tr`Pick many: drag · Shift+click for a range`)}</span>
                     <span class="pf-ed-count"></span>
                     <button type="button" class="menu_button pf-be-put"></button>
                     <button type="button" class="menu_button pf-be-out">${e(tr`Remove from group`)}</button>
                     <button type="button" class="pf-tb pf-be-clear">${e(tr`Clear`)}</button>
                 </div>
+                <ul class="pf-ed-list" role="listbox" aria-multiselectable="true"></ul>
             </section>
         </div>`;
     const treeEl = root.querySelector('.pf-be-tree'), list = root.querySelector('.pf-ed-list');
     const count = root.querySelector('.pf-ed-count'), putBtn = root.querySelector('.pf-be-put'), outBtn = root.querySelector('.pf-be-out');
     const summary = root.querySelector('.pf-ed-summary');
     const setSummary = text => { summary.textContent = text; };
-    setSummary(auto ? (plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
+    setSummary(imp ? tr`Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.` : auto ? (plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
 
     const tree = () => makeTree(draft);
     const groupOf = id => draft.find(g => g.members.includes(id)) || null;
@@ -1845,18 +1843,27 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         const g = draft.find(x => x.id === li.dataset.g);
         const act = ev.target.closest('[data-act]')?.dataset.act;
         if (act === 'sub' && g) { const k = addGroup(g.id); if (selected.size) putInto(k); renderTree(); refilter(); focusName(k.id); return; }
-        if (act === 'excl' && g) { g.exclusive = !g.exclusive; renderTree(); return; }
+        if (act === 'excl' && g) { g.exclusive = !g.exclusive; const b = ev.target.closest('[data-act]'); b.classList.toggle('on', !!g.exclusive); b.setAttribute('aria-pressed', String(!!g.exclusive)); return; }   // 다시 그리지 않음(깜빡임 없게)
         if (act === 'del' && g) {
-            const t = tree();
-            t.childrenOf(g).forEach(k => { k.parent = g.parent || null; });
-            draft = draft.filter(x => x !== g);
-            if (sel === g.id) sel = null;
-            renderTree(); refreshTags(); refilter(); return;
+            // 확인 · 취소 창을 띄운 뒤 풂 (마우스 · 터치 똑같이)
+            (async () => {
+                const ok = await callGenericPopup(`${escapeHtml(tr`Ungroup "${g.name || tr`(no name)`}"?`)}<br><small>${escapeHtml(tr`The toggles inside are not deleted and stay where they are. Groups inside move up one level.`)}</small>`, POPUP_TYPE.CONFIRM);
+                if (!ok) return;
+                tree().childrenOf(g).forEach(k => { k.parent = g.parent || null; });
+                draft = draft.filter(x => x !== g);
+                if (sel === g.id) sel = null;
+                renderTree(); refreshTags(); refilter();
+            })();
+            return;
         }
-        if (ev.target.closest('.pf-be-name') && sel === li.dataset.g) return;
-        sel = li.dataset.g;
-        renderTree();
-        if (filter === 'mine') refilter();
+        // 고르기는 표시만 바꿈(목록을 다시 그리지 않아 깜빡이지 않음) — 이름 칸을 누르면 바로 편집, 고른 그룹을 한 번 더 누르면 풀림
+        const next = ev.target.closest('.pf-be-name') ? li.dataset.g : (sel === li.dataset.g ? null : li.dataset.g);
+        if (next !== sel) {
+            sel = next;
+            treeEl.querySelectorAll('[data-g]').forEach(x => { const on = x.dataset.g === sel; x.classList.toggle('pf-be-sel', on); x.setAttribute('aria-selected', String(on)); });
+            updateActions();
+            if (filter === 'mine') refilter();
+        }
     });
     root.querySelector('.pf-be-add').addEventListener('click', () => { const g = addGroup(null); if (selected.size) putInto(g); renderTree(); refilter(); focusName(g.id); });
 
@@ -1866,16 +1873,20 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         li.className = 'pf-ed-row' + (it.divider ? ' pf-ed-div' : '') + (it.on ? '' : ' pf-ed-off');
         li.dataset.id = it.id;
         li.setAttribute('role', 'option');
-        li.innerHTML = `<input type="checkbox" tabindex="-1"><span class="pf-ed-pos">#${it.pos}</span><span class="pf-ed-name-text">${e(it.name)}</span><span class="pf-ed-tag"></span>`;
+        li.innerHTML = `<span class="pf-ed-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span><input type="checkbox" tabindex="-1"><span class="pf-ed-pos">#${it.pos}</span><span class="pf-ed-name-text">${e(it.name)}</span><span class="pf-ed-how" hidden></span><span class="pf-ed-tag"></span>`;
         list.append(li);
     }
     const rows = [...list.children];
+    const rowOf = new Map(rows.map(li => [li.dataset.id, li]));
     function refreshTags() {
         const t = tree();
         rows.forEach(li => {
             const g = groupOf(li.dataset.id), tag = li.querySelector('.pf-ed-tag');
             tag.hidden = !g;
             if (g) { tag.style.setProperty('--pf-color', colorOf(g)); tag.textContent = t.path(g).map(y => y.name || tr`(no name)`).join(' › '); }
+            const how = g && impRes?.how[li.dataset.id], hw = li.querySelector('.pf-ed-how');
+            hw.hidden = !how;
+            hw.textContent = how === 'name' ? tr`by name` : how === 'placed' ? tr`new toggle` : '';
         });
     }
     const setRow = (li, on) => {
@@ -1895,6 +1906,34 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     let last = null, paint = null, press = null;
     const changed = () => updateActions();
     const rangeTo = (idx, on) => { const [a, b] = [Math.min(last, idx), Math.max(last, idx)]; for (let i = a; i <= b; i++) if (!rows[i].hidden) setRow(rows[i], on); };
+    // 손잡이로 끌어 그룹 안 순서 바꾸기 (마우스 · 터치 같음)
+    let grab = null;
+    list.addEventListener('pointerdown', ev => {
+        const grip = ev.target.closest('.pf-ed-grip'); if (!grip) return;
+        const li = grip.closest('.pf-ed-direct'); if (!li || !list.classList.contains('pf-be-reorder')) return;
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        grip.setPointerCapture?.(ev.pointerId);
+        grab = { li, g: draft.find(x => x.id === sel) };
+        li.classList.add('pf-ed-grab');
+    }, true);
+    list.addEventListener('pointermove', ev => {
+        if (!grab) return;
+        ev.preventDefault();
+        const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.pf-ed-direct');
+        if (!over || over === grab.li || !list.contains(over)) return;
+        const r = over.getBoundingClientRect();
+        over[ev.clientY < r.top + r.height / 2 ? 'before' : 'after'](grab.li);
+    }, true);
+    const drop = () => {
+        if (!grab) return;
+        const { li, g } = grab; grab = null;
+        li.classList.remove('pf-ed-grab');
+        if (!g) return;
+        const next = [...list.querySelectorAll('.pf-ed-direct')].map(x => x.dataset.id).filter(id => g.members.includes(id));
+        if (next.join() !== g.members.join()) { g.members = next; custom.add(g.id); }
+    };
+    list.addEventListener('pointerup', drop, true);
+    list.addEventListener('pointercancel', drop, true);
     list.addEventListener('pointerdown', ev => {
         const li = ev.target.closest('.pf-ed-row');
         if (!li || ev.button !== 0) return;
@@ -1927,9 +1966,10 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
 
     // 넣기 · 빼기: 고른 토글을 다른 그룹에서 빼고 고른 그룹에 (실제 순서대로)
     function putInto(g) {
-        const ids = [...selected];
+        const ids = [...selected].sort((p, q) => (at.get(p) ?? 1e9) - (at.get(q) ?? 1e9));
         draft.forEach(x => { x.members = x.members.filter(id => !selected.has(id)); });
-        g.members = [...g.members, ...ids].sort((p, q) => (at.get(p) ?? 1e9) - (at.get(q) ?? 1e9));
+        // 순서를 직접 바꾼 그룹은 그 순서 뒤에 붙이고, 아니면 실제 순서대로
+        g.members = custom.has(g.id) ? [...g.members, ...ids] : [...g.members, ...ids].sort((p, q) => (at.get(p) ?? 1e9) - (at.get(q) ?? 1e9));
     }
     const afterMove = () => { rows.forEach(li => setRow(li, false)); last = null; renderTree(); refreshTags(); refilter(); };
     putBtn.addEventListener('click', () => { const g = draft.find(x => x.id === sel); if (!g || !selected.size) return; putInto(g); afterMove(); });
@@ -1946,6 +1986,13 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
             const okF = filter === 'all' || (filter === 'mine' ? (sel === '' ? !groupOf(id) : mine.has(id)) : !groupOf(id));
             li.hidden = !okF || (!!q && !order[i].name.toLowerCase().includes(q));
         });
+        // 「고른 그룹」 보기: 그 그룹 토글을 그룹 안 순서대로 · 끌어서 순서 바꾸기
+        const reorder = filter === 'mine' && !!g && !q;
+        list.classList.toggle('pf-be-reorder', reorder);
+        const direct = new Set(reorder ? g.members : []);
+        const seq = reorder ? [...g.members.map(id => rowOf.get(id)).filter(Boolean), ...rows.filter(li => !direct.has(li.dataset.id))] : rows;
+        if (seq.some((li, i) => list.children[i] !== li)) list.append(...seq);
+        rows.forEach(li => li.classList.toggle('pf-ed-direct', direct.has(li.dataset.id)));
         root.querySelectorAll('.pf-be-filter .pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.f === filter)));
     }
     root.querySelectorAll('.pf-be-filter .pf-ed-chip').forEach(c => c.addEventListener('click', () => { filter = c.dataset.f; refilter(); }));
@@ -1981,9 +2028,19 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         });
     }
 
+    if (imp) {
+        const stats = root.querySelector('.pf-imp-stats');
+        const showStats = () => { stats.textContent = remapStats(impRes); };
+        showStats();
+        root.querySelector('.pf-imp-from')?.addEventListener('change', ev => {
+            impSrc = imp[Number(ev.target.value)]; draft = runImport(); sel = null;
+            showStats(); renderTree(); refreshTags(); refilter();
+        });
+    }
+
     renderTree(); refreshTags(); refilter();
     if (addNew && sel) focusName(sel);
-    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: auto ? tr`Create` : tr`Save`, cancelButton: tr`Cancel`, wide: true, large: true, allowVerticalScrolling: true });
+    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: imp ? tr`Bring groups` : auto ? tr`Create` : tr`Save`, cancelButton: tr`Cancel`, wide: true, large: true, allowVerticalScrolling: true });
     document.removeEventListener('pointerup', stopPaint);
     if (!ok) return;
 
@@ -1996,12 +2053,27 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         const sure = await callGenericPopup(escapeHtml(tr`Remove the current ${data.groups.length} groups of this preset and regroup? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
         if (!sure) return;
     }
+    // 그룹 안 순서를 바꿨으면 실제 순서도: 그 토글들이 있던 자리는 그대로 두고 그 안에서만 차례를 바꿈
+    const moved = draft.filter(g => custom.has(g.id));
+    if (moved.length) {
+        const cur = pm.getPromptOrderForCharacter(pm.activeCharacter).slice();
+        for (const g of moved) {
+            const want = g.members.filter(id => cur.some(x => x.identifier === id));
+            const slots = cur.map((x, i) => (want.includes(x.identifier) ? i : -1)).filter(i => i >= 0);
+            const entries = want.map(id => cur.find(x => x.identifier === id));
+            slots.forEach((slot, k) => { cur[slot] = entries[k]; });
+        }
+        pm.removePromptOrderForCharacter(pm.activeCharacter);
+        pm.addPromptOrderForCharacter(pm.activeCharacter, cur);
+        pm.saveServiceSettings();
+        pm.render();
+    }
     const undo = structuredClone(data.groups);
     data.groups = draft;
     settings().view = 'grouped';
     save();
     apply();
-    offerUndo(undo, auto ? tr`${draft.length} groups created.` : tr`Groups saved.`);
+    offerUndo(undo, imp ? tr`Groups imported.` : auto ? tr`${draft.length} groups created.` : tr`Groups saved.`);
 }
 
 
