@@ -96,16 +96,29 @@ function groupColor(g, i, tree) {
     const fromEmoji = emojiColor(g.name);
     if (fromEmoji) return fromEmoji;
     if (tree) {
-        // 이모지가 없는 하위 그룹은 상위 그룹 색, 큰 묶음은 차례대로 팔레트 색
+        // 이모지가 없는 하위 그룹은 상위 그룹 색, 큰 묶음은 팔레트 색 — 한 번 정하면 그룹에 적어 둬서(slot) 순서가 바뀌어도 안 밀림
         const parent = tree.parentOf(g);
         if (parent) return groupColor(parent, tree.indexOf(parent), tree);
-        return COLORS[tree.topIndexOf(g) % COLORS.length];
+        if (!Number.isInteger(g.slot)) assignSlot(g, tree);
+        return COLORS[g.slot % COLORS.length];
     }
     return COLORS[i % COLORS.length];
 }
 
 const LEAD_EMOJI = /^\s*((?:\p{Regional_Indicator}{2})|(?:\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*))/u;
 // 이모지 색은 한 번 뽑으면 브라우저에 기억 (다음에 열 때 캔버스로 다시 안 그림)
+/** 큰 그룹의 팔레트 자리 정하기: 처음(아무도 자리가 없을 때)은 지금 차례 그대로 → 보이는 색이 안 바뀜, 그 뒤 새 그룹은 가장 덜 쓴 색 */
+function assignSlot(g, tree) {
+    const tops = tree.tops;
+    if (!tops.some(t => Number.isInteger(t.slot))) {
+        tops.forEach((t, i) => { t.slot = i % COLORS.length; });
+    } else {
+        const used = COLORS.map((_, i) => tops.filter(t => t !== g && t.slot === i).length);
+        g.slot = used.indexOf(Math.min(...used));
+    }
+    save();
+}
+
 const EMOJI_KEY = 'promptFolders.emojiColors.v1';
 const emojiCache = new Map((() => { try { return Object.entries(JSON.parse(localStorage.getItem(EMOJI_KEY) || '{}')); } catch { return []; } })());
 let emojiSaveTimer = null;
@@ -714,7 +727,7 @@ function makeTree(groups) {
     const indexOf = g => groups.indexOf(g);
     const tops = groups.filter(x => !parentOf(x));
     const topIndexOf = g => tops.indexOf(g);
-    return { byId, parentOf, childrenOf, isDescendant, allItems, path, indexOf, topIndexOf };
+    return { byId, parentOf, childrenOf, isDescendant, allItems, path, indexOf, topIndexOf, tops };
 }
 
 function buildGroup(g, ctx, depth) {
@@ -1491,7 +1504,7 @@ function remapGroups(groups, srcNames = {}) {
             else { const hit = byName.get(nfcName(srcNames[id])); if (hit) { to = hit; how[hit] = 'name'; stats.byName++; } else stats.missing++; }
             if (to && !taken.has(to)) { taken.add(to); members.push(to); }
         }
-        return { id: g.id || newId(), name: String(g.name ?? ''), members, parent: g.parent || null, collapsed: !!g.collapsed, ...(g.color ? { color: g.color } : {}), ...(g.exclusive ? { exclusive: true } : {}) };
+        return { id: g.id || newId(), name: String(g.name ?? ''), members, parent: g.parent || null, collapsed: !!g.collapsed, ...(g.color ? { color: g.color } : {}), ...(Number.isInteger(g.slot) ? { slot: g.slot } : {}), ...(g.exclusive ? { exclusive: true } : {}) };
     });
     // 새 토글: 앞 · 뒤가 같은 그룹이면 그 안으로
     const order = (pm?.getPromptOrderForCharacter(pm.activeCharacter) || []).map(e => e.identifier).filter(id => known.has(id));
