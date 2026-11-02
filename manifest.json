@@ -1,0 +1,11 @@
+{
+    "display_name": "프롬프트 그룹",
+    "loading_order": 100,
+    "js": "index.js",
+    "css": "style.css",
+    "author": "URMIIE",
+    "version": "1.0.0",
+    "homePage": "https://github.com/URMIIE/SillyTavern-PromptFolders",
+    "minimum_client_version": "1.19.0",
+    "auto_update": true
+}

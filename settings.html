@@ -1,0 +1,38 @@
+<div id="pf_settings" class="pf-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>프롬프트 그룹</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <small class="pf-help">프롬프트 관리자 토글을 그룹으로 묶어요. 프롬프트 목록 위 도구 줄에서 그룹 만들기, ⋯ 메뉴에서 자동으로 묶기·그룹 배치·내보내기/가져오기를 해요. 토글이나 그룹 머리를 끌어서 옮기고, 그룹 머리 위에 놓으면 그 그룹 안으로 들어가요.</small>
+            <label class="pf-set-row" for="pf_layout">
+                <span>그룹 배치</span>
+                <select id="pf_layout" class="text_pole">
+                    <option value="real">그룹 순서 = 실제 위치 (옮기면 실제 위치도 바뀜)</option>
+                    <option value="custom">보기만 그룹 순서 (실제 위치는 그대로)</option>
+                </select>
+            </label>
+            <label class="pf-set-row" for="pf_colorStyle">
+                <span>그룹 색 표시</span>
+                <select id="pf_colorStyle" class="text_pole">
+                    <option value="dot">점</option>
+                    <option value="bar">색 띠</option>
+                    <option value="none">없음</option>
+                </select>
+            </label>
+            <label class="checkbox_label" for="pf_showPos">
+                <input type="checkbox" id="pf_showPos">
+                <span>토글마다 실제 위치(#번호) 보이기</span>
+            </label>
+            <label class="checkbox_label" for="pf_wrapNames">
+                <input type="checkbox" id="pf_wrapNames">
+                <span>긴 토글 이름은 두 줄까지 보이기</span>
+            </label>
+            <label class="checkbox_label" for="pf_syncPreset">
+                <input type="checkbox" id="pf_syncPreset">
+                <span>그룹을 프리셋 파일에도 저장 (프리셋을 공유하면 그룹도 같이 가요)</span>
+            </label>
+        </div>
+    </div>
+</div>
