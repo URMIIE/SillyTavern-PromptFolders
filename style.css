@@ -119,12 +119,14 @@ body.pf-wrap-names #completion_prompt_manager #completion_prompt_manager_list .c
     transition: background-color .12s, color .12s;
 }
 .pf-ib:hover { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent); }
+@media (hover: none) { .pf-ib:hover { background: none; } .pf-ib:active { background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent); } }  /* 터치: 누른 뒤 회색 칸이 남지 않게 */
 .pf-ib[aria-pressed="true"] { color: var(--SmartThemeQuoteColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, transparent); }
 .pf-ib:focus-visible, .pf-tb:focus-visible, .pf-group-head:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: -2px; }
 
 
 @media (pointer: coarse) {
     .pf-ib { width: 36px; height: 36px; }
+    .pf-toolbar > .pf-ib:last-child { width: 26px; }  /* 맨 끝 단추만 좁게 — 아이콘은 가운데 그대로, 오른쪽 끝이 위 줄과 거의 맞음 */
     .pf-toolbar .pf-search { height: 36px; }
     .pf-group-head { padding: 6px 8px; }
     .pf-btn { padding: 4px 6px; }
