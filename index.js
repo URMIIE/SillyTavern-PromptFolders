@@ -610,7 +610,7 @@ function stepGroup(g, dir) {
         const tree = makeTree(presetData().groups);
         const sibs = presetData().groups.filter(x => tree.parentOf(x) === tree.parentOf(g));
         const i = sibs.indexOf(g), j = i + dir;
-        if (j < 0 || j >= sibs.length) return void toastr.info(dir < 0 ? tr`Already at the top.` : tr`Already at the bottom.`);
+        if (j < 0 || j >= sibs.length) return void toastr.info(dir < 0 ? tr`Already at the top.` : tr`Already at the bottom.`, tr`Prompt Folders`);
         const data = presetData();
         const a = data.groups.indexOf(g), b = data.groups.indexOf(sibs[j]);
         [data.groups[a], data.groups[b]] = [data.groups[b], data.groups[a]];
@@ -623,7 +623,7 @@ function stepGroup(g, dir) {
     const visible = el => el && (el.matches('li.pf-group, li.pf-clone') || (el.matches(ROW_SEL) && !el.classList.contains('pf-hidden') && !el.classList.contains('pf-filtered')));
     let sib = dir < 0 ? li.previousElementSibling : li.nextElementSibling;
     while (sib && !visible(sib)) sib = dir < 0 ? sib.previousElementSibling : sib.nextElementSibling;
-    if (!sib) return void toastr.info(dir < 0 ? tr`Already at the top.` : tr`Already at the bottom.`);
+    if (!sib) return void toastr.info(dir < 0 ? tr`Already at the top.` : tr`Already at the bottom.`, tr`Prompt Folders`);
     const tree = makeTree(presetData().groups);
     const order = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter) || [];
     const at = new Map(order.map((e, i) => [e.identifier, i]));
@@ -1520,14 +1520,14 @@ async function autoGroup() {
         aiBtn.classList.add('pf-busy');
         try {
             const next = await aiPlan(order, getPrompt, running.signal);
-            if (!next.length) { toastr.info(tr`AI found nothing to group.`); return; }
+            if (!next.length) { toastr.info(tr`AI found nothing to group.`, tr`Prompt Folders`); return; }
             plan.splice(0, plan.length, ...next);
             skip.clear(); open.clear(); resetPicked();
             mode = 'all';
             root.querySelector('.pf-ed-summary').textContent = tr`Grouped by AI. Untick what you don't want, fix names, then create.`;
             render();
         } catch (err) {
-            if (!running?.signal.aborted) toastr.error(String(err?.message || err), tr`Regroup with AI`);
+            if (!running?.signal.aborted) toastr.error(`${tr`Regroup with AI`}: ${String(err?.message || err)}`, tr`Prompt Folders`);
         } finally { clearInterval(timer); running = null; aiBtn.classList.remove('pf-busy'); label.textContent = tr`Regroup with AI`; }
     });
     render();
@@ -1608,7 +1608,7 @@ function importGroups() {
             offerUndo(undo, tr`Groups imported.`);
         } catch (err) {
             console.warn('[Prompt Folders] import failed', err);
-            toastr.error(tr`This file is not a Prompt Folders export.`);
+            toastr.error(tr`This file is not a Prompt Folders export.`, tr`Prompt Folders`);
         }
     });
     input.click();
@@ -1723,7 +1723,7 @@ function setExclusive(g, on) {
         const order = promptManager.getPromptOrderForCharacter(promptManager.activeCharacter) || [];
         const items = new Set(makeTree(presetData().groups).allItems(g));
         const first = order.find(e => e.enabled && items.has(e.identifier));
-        if (first && enforceExclusive(new Set(), first.identifier)) toastr.info(tr`Kept only "${promptManager.getPromptById(first.identifier)?.name ?? first.identifier}" on in this group.`);
+        if (first && enforceExclusive(new Set(), first.identifier)) toastr.info(tr`Kept only "${promptManager.getPromptById(first.identifier)?.name ?? first.identifier}" on in this group.`, tr`Prompt Folders`);
     }
     apply();
 }
@@ -1731,7 +1731,7 @@ function setExclusive(g, on) {
 // ---------------- 되돌리기 ----------------
 function offerUndo(snapshot, message) {
     const key = presetKey();
-    toastr.success(`${escapeHtml(message)} <u>${escapeHtml(tr`Undo`)}</u>`, '', {
+    toastr.success(`${escapeHtml(message)} <u>${escapeHtml(tr`Undo`)}</u>`, tr`Prompt Folders`, {
         escapeHtml: false,
         timeOut: 10000,
         extendedTimeOut: 4000,
@@ -1739,7 +1739,7 @@ function offerUndo(snapshot, message) {
             settings().presets[key] = { ...(settings().presets[key] || {}), groups: snapshot };
             save();
             apply();
-            toastr.info(tr`Restored the previous groups.`);
+            toastr.info(tr`Restored the previous groups.`, tr`Prompt Folders`);
         },
     });
 }

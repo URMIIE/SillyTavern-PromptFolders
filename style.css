@@ -270,3 +270,6 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-ai-reload:hover { opacity: 1; }
 .pf-ai-reload[hidden] { display: none; }
 .pf-ai-reload.pf-spin i { animation: fa-spin 1s linear infinite; }
+
+/* 한국어 낱말이 줄 끝에서 쪼개지지 않게 */
+.pf-editor, .pf-auto, .pf-ai-notice, .pf-settings, .pf-menu, .pf-toolbar, #completion_prompt_manager_list .pf-group-head { word-break: keep-all; overflow-wrap: anywhere; }
