@@ -2035,10 +2035,9 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         if (act === 'del' && g) {
             // 확인 · 취소 창을 띄운 뒤 풂 (마우스 · 터치 똑같이)
             (async () => {
-                const ok = await callGenericPopup(`${escapeHtml(tr`Ungroup "${g.name || tr`(no name)`}"?`)}<br><small>${escapeHtml(tr`The toggles inside are not deleted and stay where they are. Groups inside move up one level.`)}</small>`, POPUP_TYPE.CONFIRM);
+                const ok = await callGenericPopup(`${escapeHtml(tr`Ungroup "${g.name || tr`(no name)`}"?`)}<br><small>${escapeHtml(ungroupNote(g, draft))}</small>`, POPUP_TYPE.CONFIRM);
                 if (!ok) return;
-                tree().childrenOf(g).forEach(k => { k.parent = g.parent || null; });
-                draft = draft.filter(x => x !== g);
+                draft = ungroupFrom(draft, g);
                 if (sel === g.id) sel = null;
                 renderTree(); refreshTags(); refilter();
             })();
@@ -2313,13 +2312,27 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
 }
 
 
+/** 그룹 풀기: 안의 그룹은 한 단계 위로, 하위 그룹이면 안의 토글도 위 그룹으로 올라감(예전엔 그룹 밖으로 빠져 위 그룹이 비면 같이 사라졌음) */
+function ungroupFrom(groups, g) {
+    const parent = g.parent ? groups.find(x => x.id === g.parent) : null;
+    groups.forEach(x => { if (x.parent === g.id) x.parent = g.parent || null; });
+    if (parent) for (const id of g.members || []) if (!parent.members.includes(id)) parent.members.push(id);
+    return groups.filter(x => x !== g);
+}
+
+function ungroupNote(g, groups) {
+    const parent = g.parent ? groups.find(x => x.id === g.parent) : null;
+    return parent
+        ? tr`The toggles inside move up into "${parent.name || tr`(no name)`}". Groups inside move up one level.`
+        : tr`The toggles inside are not deleted and stay where they are. Groups inside move up one level.`;
+}
+
 async function deleteGroup(g) {
-    const ok = await callGenericPopup(`${escapeHtml(tr`Ungroup "${g.name}"?`)}<br><small>${escapeHtml(tr`The toggles inside are not deleted and stay where they are. Groups inside move up one level.`)}</small>`, POPUP_TYPE.CONFIRM);
+    const data = presetData();
+    const ok = await callGenericPopup(`${escapeHtml(tr`Ungroup "${g.name}"?`)}<br><small>${escapeHtml(ungroupNote(g, data.groups))}</small>`, POPUP_TYPE.CONFIRM);
     if (!ok) return;
     const snap = takeSnap();
-    const data = presetData();
-    data.groups.forEach(x => { if (x.parent === g.id) x.parent = g.parent || null; });
-    data.groups = data.groups.filter(x => x.id !== g.id);
+    data.groups = ungroupFrom(data.groups, g);
     save();
     apply();
     offerRestore(snap, tr`Ungrouped "${g.name}".`);

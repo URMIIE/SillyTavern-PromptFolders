@@ -183,5 +183,6 @@
     "Every toggle is already in a group, so there is nothing to group. Pick \"Regroup everything\" to start over.": "모든 토글이 이미 그룹에 들어 있어서 묶을 토글이 없어요. 처음부터 다시 묶으려면 「전부 새로 묶기」를 고르세요.",
     "No toggles left outside groups to group.": "그룹에 안 든 토글이 없어서 묶을 게 없어요.",
     "No new groups to create, so nothing changed.": "새로 만들 그룹이 없어서 아무것도 바꾸지 않았어요.",
-    "Nothing changed.": "바뀐 게 없어요."
+    "Nothing changed.": "바뀐 게 없어요.",
+    "The toggles inside move up into \"${0}\". Groups inside move up one level.": "안에 있는 토글은 지워지지 않고 위 그룹 「${0}」 안으로 올라가요. 안에 있던 그룹도 한 단계 위로 올라가요."
 }
