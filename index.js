@@ -120,12 +120,13 @@ function newId() {
 
 function groupColor(g, i, tree) {
     if (g.color) return g.color;
+    // 하위 그룹은 이모지와 상관없이 상위 그룹 색(직접 고른 색만 예외) — 2026-11-04 사용자
+    const parent = tree?.parentOf(g);
+    if (parent) return groupColor(parent, tree.indexOf(parent), tree);
     const fromEmoji = emojiColor(g.name);
     if (fromEmoji) return fromEmoji;
     if (tree) {
-        // 이모지가 없는 하위 그룹은 상위 그룹 색, 큰 묶음은 팔레트 색 — 한 번 정하면 그룹에 적어 둬서(slot) 순서가 바뀌어도 안 밀림
-        const parent = tree.parentOf(g);
-        if (parent) return groupColor(parent, tree.indexOf(parent), tree);
+        // 큰 묶음은 이모지 색, 없으면 팔레트 색 — 한 번 정하면 그룹에 적어 둬서(slot) 순서가 바뀌어도 안 밀림
         if (!Number.isInteger(g.slot)) assignSlot(g, tree);
         return COLORS[g.slot % COLORS.length];
     }

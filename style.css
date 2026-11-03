@@ -138,9 +138,14 @@ body.pf-wrap-names #completion_prompt_manager #completion_prompt_manager_list .c
 body.pf-color-none .pf-name::before,
 body.pf-color-none .pf-tag::before { display: none; }
 body.pf-color-bar .pf-name::before { display: none; }
-body.pf-color-bar .pf-group-head { box-shadow: inset 3px 0 0 var(--pf-color); border-radius: 0 6px 6px 0; }   /* 여백은 점·없음과 같게(글자 자리 그대로) */
-body.pf-color-bar .pf-group:not(.pf-sub) > .pf-group-head { background: color-mix(in srgb, var(--pf-color) 10%, transparent); }
-body.pf-color-bar .pf-group:not(.pf-sub) > .pf-group-head:hover { background: color-mix(in srgb, var(--pf-color) 16%, transparent); }
+/* 띠는 box-shadow 대신 배경 그라데이션 — 테마가 `* { box-shadow: none !important }` 를 걸면 띠가 사라졌음 */
+body.pf-color-bar .pf-group-head { --pf-bar: var(--pf-color); --pf-tint: transparent; background: linear-gradient(to right, var(--pf-bar) 0 3px, var(--pf-tint) 3px); border-radius: 0 6px 6px 0; }   /* 여백은 점·없음과 같게(글자 자리 그대로) */
+body.pf-color-bar .pf-group:not(.pf-sub) > .pf-group-head { --pf-tint: color-mix(in srgb, var(--pf-color) 10%, transparent); }
+body.pf-color-bar .pf-group:not(.pf-sub) > .pf-group-head:hover { --pf-tint: color-mix(in srgb, var(--pf-color) 16%, transparent); }
+/* 하위 그룹(색 = 큰 그룹 색)은 띠를 연하게 */
+body.pf-color-bar .pf-group.pf-sub > .pf-group-head { --pf-bar: color-mix(in srgb, var(--pf-color) 55%, transparent); --pf-tint: color-mix(in srgb, var(--pf-color) 5%, transparent); }
+body.pf-color-bar .pf-group.pf-sub > .pf-group-head:hover { --pf-tint: color-mix(in srgb, var(--pf-color) 9%, transparent); }
+body.pf-color-bar .pf-group-head.pf-drop-target { --pf-tint: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent); }
 body.pf-color-bar .pf-group-body { border-left-color: color-mix(in srgb, var(--pf-color) 45%, transparent); }
 
 /* ---------- 그룹 편집 창 ---------- */
