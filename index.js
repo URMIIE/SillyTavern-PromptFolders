@@ -53,7 +53,34 @@ function presetData() {
         const shared = readPresetGroups();
         s.presets[k] = { groups: shared ? structuredClone(shared) : [] };
     }
+    applyFolds(k, s.presets[k]);
     return s.presets[k];
+}
+
+// 접고 펼친 상태는 브라우저 저장소에 바로 적고 실리태번 설정 저장은 부르지 않음 —
+// 설정 파일이 크면 저장 한 번에 화면이 0.1초 넘게 멈춰서 열고 닫을 때마다 「뚝」 끊겼음.
+// 메모리의 g.collapsed 도 같이 바꾸므로 다음에 다른 이유로 설정이 저장될 때 함께 들어감.
+const FOLD_KEY = 'promptFolders.collapsed.v1';
+let foldCache = null;
+const foldsApplied = new Set();
+function foldStore() {
+    if (!foldCache) {
+        try { foldCache = JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {}; } catch { foldCache = {}; }
+    }
+    return foldCache;
+}
+function applyFolds(key, data) {
+    if (foldsApplied.has(key)) return;
+    foldsApplied.add(key);
+    const saved = foldStore()[key];
+    if (!saved) return;
+    for (const g of data.groups || []) if (g.id in saved) g.collapsed = !!saved[g.id];
+}
+function rememberFolds(groups) {
+    const st = foldStore();
+    const map = (st[presetKey()] ||= {});
+    for (const g of groups) map[g.id] = !!g.collapsed;
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(st)); } catch { /* 저장소를 못 쓰면 메모리에만 */ }
 }
 
 function readPresetGroups() {
@@ -693,7 +720,8 @@ function renderToolbar(list, groups) {
             save();
             apply();
         });
-        bar.querySelector('.pf-fold:not(.pf-ib-gone)')?.addEventListener('click', () => setAllCollapsed(anyOpen));
+        // 그룹 하나를 열고 닫아도 목록을 다시 그리지 않으므로, 누르는 순간의 상태로 정함
+        bar.querySelector('.pf-fold:not(.pf-ib-gone)')?.addEventListener('click', () => setAllCollapsed(presetData().groups.some(g => !g.collapsed)));
     }
     // 키보드: Enter/Space 로 누르기
     bar.querySelectorAll('[role="button"]').forEach(el => el.addEventListener('keydown', ev => {
@@ -773,10 +801,11 @@ function buildGroup(g, ctx, depth) {
         <span class="pf-btn pf-more fa-solid fa-ellipsis-vertical" role="button" title="${escapeHtml(tr`Group menu`)}"></span>`;
     li.append(head);
 
+    // 열고 닫기는 목록을 다시 그리지 않고 이 그룹만 바꿈(접힌 그룹도 안은 그려 둠)
     const toggleOpen = () => {
         g.collapsed = !g.collapsed;
-        save();
-        apply();
+        rememberFolds([g]);
+        animateGroup(li, body, head, !g.collapsed);
     };
     head.addEventListener('click', e => { if (!e.target.closest('.pf-btn')) toggleOpen(); });
     head.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); toggleOpen(); } });
@@ -807,6 +836,28 @@ function buildGroup(g, ctx, depth) {
     }
     li.append(body);
     return li;
+}
+
+function animateGroup(li, body, head, open) {
+    // 움직임 없이 바로 열고 닫음(사용자: 움직이는 게 더 거슬림) — 목록 전체를 다시 그리지 않는 것만 남김
+    head.setAttribute('aria-expanded', String(open));
+    const caret = head.querySelector('.pf-caret');
+    caret?.classList.toggle('fa-chevron-down', open);
+    caret?.classList.toggle('fa-chevron-right', !open);
+    li.classList.toggle('pf-collapsed', !open);
+    syncFoldButton();
+}
+
+/** 도구 줄 「모두 접기 / 모두 펼치기」 아이콘을 지금 상태에 맞춤 */
+function syncFoldButton() {
+    const btn = document.querySelector('.pf-toolbar .pf-fold');
+    if (!btn) return;
+    const anyOpen = presetData().groups.some(g => !g.collapsed);
+    const label = anyOpen ? tr`Collapse all` : tr`Expand all`;
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    btn.querySelector('i')?.classList.toggle('fa-angles-up', anyOpen);
+    btn.querySelector('i')?.classList.toggle('fa-angles-down', !anyOpen);
 }
 
 // ---------------- 그룹 메뉴 (⋮) ----------------
@@ -1722,8 +1773,9 @@ function offerRestore(snap, message) {
 }
 
 function setAllCollapsed(collapsed) {
-    presetData().groups.forEach(g => { g.collapsed = collapsed; });
-    save();
+    const groups = presetData().groups;
+    groups.forEach(g => { g.collapsed = collapsed; });
+    rememberFolds(groups);
     apply();
 }
 
@@ -2289,13 +2341,28 @@ function syncRowMetrics() {
     // 테마를 바꿀 때 프롬프트 창이 닫혀 있으면 잴 줄이 없음 → 목록이 보이거나 크기가 바뀌면 다시 잼 (실리태번이 목록을 새로 만들 수 있어 목록마다 한 번 붙임)
     if (window.ResizeObserver && !rowWatched.has(list)) {
         rowWatched.add(list);
-        new ResizeObserver(() => { clearTimeout(rowTimer); rowTimer = setTimeout(syncRowMetrics, 80); }).observe(list);
+        // 폭이 바뀔 때(테마 · 패널 크기)만 다시 잼 — 그룹을 열고 닫아 높이만 바뀔 때 다시 재면
+        // 새로 보이는 줄 때문에 값이 1px 오가며 위 그룹 머리들이 한 박자 늦게 움직였음(「뚜둑」)
+        let lastW = -1;
+        new ResizeObserver(([e]) => {
+            const w = Math.round(e.contentRect.width);
+            if (w === lastW && list.style.getPropertyValue('--pf-row-h')) return;
+            lastW = w;
+            clearTimeout(rowTimer); rowTimer = setTimeout(syncRowMetrics, 80);
+        }).observe(list);
     }
     const heights = [];
     // 그룹 안 줄은 원래 줄의 복사본(pf-clone)이라 data-pm-identifier 가 없음 — 보이는 프롬프트 줄이면 다 잼
     for (const row of list.querySelectorAll('li.completion_prompt_manager_prompt:not(.completion_prompt_manager_list_head):not(.pf-hidden)')) {
-        const h = row.offsetHeight;
-        if (h) heights.push(h);
+        let h = row.offsetHeight;
+        // 이름이 좁은 칸에서 두 줄로 꺾인 줄은 한 줄짜리 높이로 바꿔 잼(폰에서 모든 줄이 꺾이면 그룹 머리가 두 줄 높이가 되던 것)
+        const name = row.querySelector('.completion_prompt_manager_prompt_name');
+        const lh = name ? parseFloat(getComputedStyle(name).lineHeight) : NaN;
+        if (name && lh > 0) {
+            const lines = Math.round(name.offsetHeight / lh);
+            if (lines > 1) h -= (lines - 1) * lh;
+        }
+        if (h) heights.push(Math.round(h));
         if (heights.length >= 12) break;
     }
     if (!heights.length) return;   // 모두 접혀 있으면 지난 값 그대로
@@ -2337,9 +2404,13 @@ function init() {
     if (themeCss) new MutationObserver(() => setTimeout(syncRowMetrics, 200)).observe(themeCss, { childList: true, characterData: true, subtree: true });
     // 프롬프트 창(왼쪽 패널)을 열거나 탭을 바꿀 때도 다시 잼 — 테마를 바꿀 땐 창이 닫혀 있어 잴 줄이 없을 수 있음
     document.addEventListener('click', (e) => {
-        if (e.target?.closest?.('#ai-config-button .drawer-toggle, #left-nav-panel .openai-tab-buttons, .pf-group-head')) {
+        if (e.target?.closest?.('#ai-config-button .drawer-toggle, #left-nav-panel .openai-tab-buttons')) {
             setTimeout(syncRowMetrics, 150);
             setTimeout(syncRowMetrics, 600);
+        } else if (e.target?.closest?.('.pf-group-head')) {
+            // 그룹을 열고 닫을 땐 이미 잰 값을 그대로(다시 재면 위 그룹 머리들이 1px씩 늦게 움직임) — 아직 못 쟀을 때만
+            const list = document.getElementById(LIST_ID);
+            if (list && !list.style.getPropertyValue('--pf-row-h')) setTimeout(syncRowMetrics, 150);
         }
     }, true);
 

@@ -527,3 +527,9 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 #completion_prompt_manager_list:has(.pf-group) > .completion_prompt_manager_list_separator { height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; }
 #completion_prompt_manager_list:has(.pf-group) > .completion_prompt_manager_list_separator hr { margin: .3em 0 !important; }
 #completion_prompt_manager_list:has(.pf-group) > .completion_prompt_manager_list_head { margin-bottom: 0 !important; }
+
+/* 다른 확장이 같은 이름(.pf-sub · .pf-group-body · .pf-group)에 여백 · flex · 바탕을 걸어도 프롬프트 목록 안에선 우리 모양 그대로 */
+#completion_prompt_manager #completion_prompt_manager_list li.pf-group { padding: 0; flex-direction: initial; }
+#completion_prompt_manager #completion_prompt_manager_list .pf-group-body { display: block; border-radius: 0; background: none; gap: 0; }
+#completion_prompt_manager #completion_prompt_manager_list .pf-collapsed > .pf-group-body { display: none; }
+
