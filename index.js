@@ -784,7 +784,7 @@ function buildGroup(g, ctx, depth) {
     const subCount = tree.childrenOf(g).length;
 
     const head = document.createElement('div');
-    head.className = 'pf-group-head';
+    head.className = 'pf-group-head' + (items.length && !enabledCount ? ' pf-all-off' : '');   // 다 꺼진 그룹은 꺼진 토글 줄처럼 흐리게
     head.title = [g.name, tr`On ${enabledCount}/${items.length} · real position ${range}`,
         subCount ? tr`${subCount} sub-groups` : '', tokens ? tr`Tokens of enabled items: ${tokens}` : ''].filter(Boolean).join('\n');
     head.setAttribute('role', 'button');
@@ -2379,8 +2379,59 @@ function syncRowMetrics() {
         if (h) heights.push(Math.round(h));
         if (heights.length >= 12) break;
     }
+    syncRowLook(list);   // 모양은 숨긴 원래 줄로도 잴 수 있어서 그룹이 다 접혀 있어도 잼
     if (!heights.length) return;   // 모두 접혀 있으면 지난 값 그대로
     list.style.setProperty('--pf-row-h', Math.min(...heights) + 'px');
+}
+
+// 테마가 프롬프트 줄을 상자(테두리 · 바탕 · 둥근 모서리)로 그리면 그룹 머리도 같은 상자로 — 안쪽 줄만 테마를 따르고 그룹 머리는 맨글로 보였음
+function syncRowLook(list) {
+    // 켜진 줄만 칠하는 테마(켜짐 표시)도 있어서, 켜진 줄 · 꺼진 줄에 같이 있는 모양만 따름 — 그룹 머리가 「켜진 토글」처럼 보이지 않게
+    // 보이는 줄이 없으면(그룹이 다 접힘) 숨겨 둔 원래 줄로 — 숨겨져 있어도 테마 색 · 테두리 값은 같음
+    const pick = (q) => {
+        // 마우스가 올라간 줄은 「올림」 색이라 빼고 잼
+        const rows = [...list.querySelectorAll('li.completion_prompt_manager_prompt:not(.completion_prompt_manager_list_head)' + q)].filter(e => !e.matches(':hover, :focus-within'));
+        return rows.find(e => e.offsetParent) || rows[0];
+    };
+    const on = pick(':not(.completion_prompt_manager_prompt_disabled):has(.prompt-manager-toggle-action)');
+    const off = pick('.completion_prompt_manager_prompt_disabled:has(.prompt-manager-toggle-action)');
+    if (!on && !off) return;
+    const c = getComputedStyle(on || off);
+    const d = getComputedStyle(off || on);
+    const clear = (bg) => /^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg);
+    const boxed = parseFloat(c.borderTopWidth) > 0 && c.borderTopStyle !== 'none' && !clear(c.borderTopColor)
+        && parseFloat(d.borderTopWidth) > 0 && d.borderTopStyle !== 'none';   // 테두리는 켜짐 · 꺼짐 둘 다 있으면(선 모양은 달라도) 켜진 줄 모양으로
+    const filled = !clear(c.backgroundColor) && c.backgroundColor === d.backgroundColor;
+    const set = (k, v) => v == null ? list.style.removeProperty(k) : list.style.setProperty(k, v);
+    set('--pf-row-border', boxed ? `${c.borderTopWidth} ${c.borderTopStyle} ${c.borderTopColor}` : null);
+    set('--pf-row-radius', boxed || filled ? c.borderTopLeftRadius : null);
+    set('--pf-row-bg', filled ? c.backgroundColor : null);
+    set('--pf-row-shadow', (boxed || filled) && c.boxShadow !== 'none' ? c.boxShadow : null);
+    set('--pf-row-gap', boxed || filled ? c.marginBottom : null);
+    // 그룹 스위치 · ⋮ 도 그 테마의 토글 줄 아이콘(스위치 · 연필)과 같은 색 · 옅기 · 크기 · 그림자로 — 그룹 아이콘만 진하고 또렷했음
+    // 고정 자리(마커) 줄엔 스위치 · 연필이 없어서, 그 아이콘이 있는 줄에서 잼
+    const icon = (state, sel, key) => {
+        const e = pick(state + ':has(' + sel + ')')?.querySelector(sel);
+        const k = e && getComputedStyle(e);
+        set(`--pf-${key}-color`, k ? k.color : null);
+        set(`--pf-${key}-op`, k ? k.opacity : null);
+        set(`--pf-${key}-size`, k ? k.fontSize : null);
+        set(`--pf-${key}-filter`, k && k.filter !== 'none' ? k.filter : null);
+    };
+    icon(':not(.completion_prompt_manager_prompt_disabled)', '.prompt-manager-toggle-action', 'tg-on');
+    icon('.completion_prompt_manager_prompt_disabled', '.prompt-manager-toggle-action', 'tg-off');
+    icon('', '.prompt-manager-edit-action', 'ic');
+    // 꺼진 토글 줄의 흐림(이름 색 · 줄 · 이름 칸 옅기) — 다 꺼진 그룹 머리에 같은 흐림
+    // 테마가 꺼진 줄을 켜진 줄과 다르게(흐리게) 그릴 때만 — 같으면 그룹도 그대로
+    const look = (row) => {
+        const name = row?.querySelector('.completion_prompt_manager_prompt_name .prompt-manager-inspect-action');
+        const block = row?.querySelector('.completion_prompt_manager_prompt_name');
+        return name ? { color: getComputedStyle(name).color, op: +getComputedStyle(row).opacity * +getComputedStyle(block).opacity } : null;
+    };
+    const offLook = look(off), onLook = look(on);
+    const dims = offLook && (!onLook || offLook.color !== onLook.color || offLook.op !== onLook.op);
+    set('--pf-off-name', dims ? offLook.color : null);
+    set('--pf-off-op', dims ? String(offLook.op) : null);
 }
 
 function pause() {
@@ -2415,7 +2466,12 @@ function init() {
     syncRowMetrics();
     // 테마를 바꾸면 줄 높이가 달라지므로 다시 잼
     const themeCss = document.getElementById('custom-style');
-    if (themeCss) new MutationObserver(() => setTimeout(syncRowMetrics, 200)).observe(themeCss, { childList: true, characterData: true, subtree: true });
+    // 테마가 바뀌면 바로 한 번, 0.3초 뒤 한 번 더(다른 확장이 테마를 보고 붙이는 손질은 그 뒤에 들어옴)
+    let lateSync;
+    const resync = () => { syncRowMetrics(); clearTimeout(lateSync); lateSync = setTimeout(syncRowMetrics, 300); };
+    if (themeCss) new MutationObserver(resync).observe(themeCss, { childList: true, characterData: true, subtree: true });
+    // 테마 글자 · 바탕색(실리태번이 <html> style 에 넣는 변수)은 테마 CSS 와 따로 바뀜 → 그때도
+    new MutationObserver(resync).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
     // 프롬프트 창(왼쪽 패널)을 열거나 탭을 바꿀 때도 다시 잼 — 테마를 바꿀 땐 창이 닫혀 있어 잴 줄이 없을 수 있음
     document.addEventListener('click', (e) => {
         if (e.target?.closest?.('#ai-config-button .drawer-toggle, #left-nav-panel .openai-tab-buttons')) {

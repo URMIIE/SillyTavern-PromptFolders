@@ -538,3 +538,28 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 #completion_prompt_manager #completion_prompt_manager_list .pf-group-body { display: block; border-radius: 0; background: none; gap: 0; }
 #completion_prompt_manager #completion_prompt_manager_list .pf-collapsed > .pf-group-body { display: none; }
 
+
+/* 테마가 프롬프트 줄을 상자로 그리면 그룹 머리도 같은 상자(index.js syncRowLook 이 잰 값). 상자가 없는 테마는 원래대로 */
+#completion_prompt_manager_list .pf-group-head {
+    border: var(--pf-row-border, 0 none transparent);
+    border-radius: var(--pf-row-radius, 6px);
+    background-color: var(--pf-row-bg, transparent);
+    box-shadow: var(--pf-row-shadow, none);
+    margin-bottom: var(--pf-row-gap, 0);
+}
+
+/* 그룹 스위치 · ⋮ 를 테마의 토글 줄 아이콘과 같게(index.js syncRowLook 이 잰 값, 못 재면 원래 색) — 마우스를 올리면 진하게는 그대로 */
+#completion_prompt_manager_list .pf-group-head .pf-toggle-all.fa-toggle-on {
+    color: var(--pf-tg-on-color, var(--SmartThemeBodyColor)); opacity: var(--pf-tg-on-op, 1); font-size: var(--pf-tg-on-size, inherit); filter: var(--pf-tg-on-filter, none);
+}
+#completion_prompt_manager_list .pf-group-head .pf-toggle-all.fa-toggle-off {
+    color: var(--pf-tg-off-color, var(--pf-muted)); opacity: var(--pf-tg-off-op, 1); font-size: var(--pf-tg-off-size, inherit); filter: var(--pf-tg-off-filter, none);
+}
+#completion_prompt_manager_list .pf-group-head .pf-more {
+    color: var(--pf-ic-color, var(--pf-muted)); opacity: var(--pf-ic-op, 1); font-size: var(--pf-ic-size, inherit); filter: var(--pf-ic-filter, none);
+}
+#completion_prompt_manager_list .pf-group-head :is(.pf-toggle-all, .pf-more):hover { opacity: 1; }
+
+/* 토글이 다 꺼진 그룹(0/n)은 그 테마가 꺼진 토글 줄을 흐리게 그릴 때만 같은 흐림(index.js syncRowLook 이 잰 값, 안 흐리는 테마는 그대로) */
+#completion_prompt_manager_list .pf-group-head.pf-all-off .pf-name { color: var(--pf-off-name, inherit); opacity: var(--pf-off-op, 1); }
+#completion_prompt_manager_list .pf-group-head.pf-all-off :is(.pf-count, .pf-folder) { color: var(--pf-off-name, var(--pf-muted)); opacity: var(--pf-off-op, 1); }
