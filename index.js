@@ -2145,11 +2145,17 @@ async function openGroupQuick(g0) {
         </div>
         <div class="pf-qe-swatches" hidden></div>
         <div class="pf-qe-kids" hidden></div>
-        <div class="pf-be-head"><b>${e(tr`Toggles in this group`)} <span class="pf-be-n pf-qe-count"></span></b></div>
-        <ul class="pf-ed-list pf-be-reorder pf-qe-list"></ul>
-        <div class="pf-be-head"><b>${e(tr`Add a toggle`)}</b></div>
-        <div class="pf-ed-bar"><label class="pf-search pf-qe-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="${e(tr`Search toggles`)}" aria-label="${e(tr`Search toggles`)}"></label></div>
-        <ul class="pf-ed-list pf-qe-found"></ul>`;
+        <div class="pf-qe-panes">
+            <section class="pf-qe-pane">
+                <div class="pf-be-head"><b>${e(tr`Toggles in this group`)} <span class="pf-be-n pf-qe-count"></span></b></div>
+                <ul class="pf-ed-list pf-be-reorder pf-qe-list"></ul>
+            </section>
+            <section class="pf-qe-pane">
+                <div class="pf-be-head"><b>${e(tr`Add a toggle`)}</b></div>
+                <div class="pf-ed-bar"><label class="pf-search pf-qe-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="${e(tr`Search toggles`)}" aria-label="${e(tr`Search toggles`)}"></label></div>
+                <ul class="pf-ed-list pf-qe-found"></ul>
+            </section>
+        </div>`;
     const $ = sel => root.querySelector(sel);
     const name = $('.pf-qe-name'), list = $('.pf-qe-list'), found = $('.pf-qe-found'), search = $('.pf-qe-search input');
     name.value = g.name || '';
@@ -2239,7 +2245,7 @@ async function openGroupQuick(g0) {
     $('.pf-qe-kids').addEventListener('click', ev => { const b = ev.target.closest('.pf-qe-kid'); if (!b) return; goKid = b.dataset.g; root.closest('.popup')?.querySelector('.popup-button-ok')?.click(); });
 
     paintHead(); renderList(); refind();
-    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Save`, cancelButton: tr`Cancel`, allowVerticalScrolling: true });
+    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Save`, cancelButton: tr`Cancel`, wide: true, allowVerticalScrolling: true });
     if (!ok) return;
 
     // 비면(토글도 하위 그룹도 없음) 그룹은 풀고, 이름이 비면 안 토글 이름으로

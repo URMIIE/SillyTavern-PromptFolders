@@ -588,13 +588,16 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-auto-ai .menu_button.pf-auto-ai-run:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 2px; }
 .pf-auto-ai .menu_button.pf-auto-ai-run.pf-busy { opacity: .85; }
 /* 「이 그룹 편집」 작은 창 — 큰 편집기 부품을 그대로 쓰고, 높이는 고정(검색 결과로 창이 들쑥날쑥하지 않게): 위 정보 · 아래 두 목록이 남는 높이를 나눠 가짐 */
-.pf-editor.pf-qe { width: min(460px, 86vw); height: min(74vh, 640px); min-height: 0; gap: 8px; }
+.pf-editor.pf-qe { width: 100%; max-width: 860px; margin: 0 auto; height: min(74vh, 640px); min-height: 0; gap: 8px; }
 .pf-qe > * { flex: none; margin: 0 !important; }
 .pf-qe .pf-qe-head { grid-template-columns: 12px minmax(0, 1fr) auto; cursor: default; padding: 6px 8px; }
 .pf-qe .pf-qe-dot { all: unset; width: 11px; height: 11px; border-radius: 50%; background: var(--pf-color); cursor: pointer; }
 .pf-qe .pf-qe-name.text_pole { font-weight: 600; }
-.pf-qe .pf-qe-list { flex: 1 1 55%; min-height: 72px; max-height: none; }
-.pf-qe .pf-qe-found { flex: 1 1 45%; min-height: 72px; max-height: none; }
+/* 가로: 왼쪽 이 그룹 토글 | 오른쪽 토글 넣기 (좁은 화면은 위아래로) */
+.pf-qe .pf-qe-panes { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.pf-qe .pf-qe-pane { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.pf-qe .pf-qe-list, .pf-qe .pf-qe-found { flex: 1 1 auto; min-height: 72px; max-height: none; }
+@media (max-width: 700px) { .pf-qe .pf-qe-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); } }
 .pf-qe .pf-qe-row, .pf-qe .pf-qe-hit { cursor: default; }
 .pf-qe .pf-qe-hit { cursor: pointer; }
 .pf-qe .pf-qe-plus { flex: none; width: 22px; text-align: center; font-size: .8em; color: var(--pf-muted); }
