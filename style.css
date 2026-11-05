@@ -587,3 +587,35 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-auto-ai .menu_button.pf-auto-ai-run:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 24%, transparent); border-color: var(--SmartThemeQuoteColor); }
 .pf-auto-ai .menu_button.pf-auto-ai-run:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 2px; }
 .pf-auto-ai .menu_button.pf-auto-ai-run.pf-busy { opacity: .85; }
+/* 「이 그룹 편집」 작은 창 — 그룹 하나만: 이름 · 색 · 택1, 이 그룹 토글(끌어서 순서 · ×로 빼기), 토글 넣기 */
+.pf-qe { display: flex; flex-direction: column; gap: 8px; text-align: left; width: min(440px, 86vw); }
+.pf-qe-head { display: flex; align-items: center; gap: 8px; }
+.pf-qe-dot { all: unset; flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--pf-color); cursor: pointer; box-shadow: 0 0 0 3px color-mix(in srgb, var(--pf-color) 22%, transparent); }
+.pf-qe-name { flex: 1 1 auto; min-width: 0; margin: 0 !important; }
+.pf-qe-one { all: unset; flex: none; padding: 3px 10px; border-radius: 999px; font-size: .82em; cursor: pointer; color: var(--pf-muted, inherit); border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 25%, transparent); }
+.pf-qe-one.on { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 20%, transparent); border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, transparent); }
+.pf-qe-swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pf-qe-swatches[hidden] { display: none; }
+.pf-qe-auto { all: unset; font-size: .8em; cursor: pointer; text-decoration: underline; opacity: .75; }
+.pf-qe-sub { display: flex; align-items: baseline; gap: 6px; margin-top: 4px; font-size: .9em; }
+.pf-qe-count { font-size: .85em; opacity: .6; font-variant-numeric: tabular-nums; }
+.pf-qe-list, .pf-qe-found { list-style: none; margin: 0; padding: 0; max-height: min(42vh, 360px); overflow-y: auto; border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 14%, transparent); }
+.pf-qe-found { max-height: min(30vh, 260px); }
+.pf-qe-found[hidden] { display: none; }
+.pf-qe-row, .pf-qe-hit, .pf-qe-empty { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 2px 4px; border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent); }
+.pf-qe-empty { opacity: .6; font-size: .88em; }
+.pf-qe-hit { cursor: pointer; }
+.pf-qe-hit:hover, .pf-qe-hit:focus-visible { background: color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent); }
+.pf-qe-grip { flex: none; cursor: grab; opacity: .45; touch-action: none; font-size: .85em; }
+.pf-qe-grab { opacity: .6; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, transparent); }
+.pf-qe-pos { flex: none; min-width: 3ch; font-size: .78em; opacity: .55; font-variant-numeric: tabular-nums; }
+.pf-qe-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-qe-from { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .55; font-size: .78em; }
+.pf-qe-x { all: unset; flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer; opacity: .55; }
+.pf-qe-x:hover { opacity: 1; background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent); }
+.pf-qe-kids { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .85em; }
+.pf-qe-kids[hidden] { display: none; }
+.pf-qe-kids > span { opacity: .6; }
+.pf-qe-kid { all: unset; cursor: pointer; padding: 2px 9px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent); }
+.pf-qe-kid small { opacity: .6; margin-left: 3px; }
+@media (pointer: coarse) { .pf-qe-row, .pf-qe-hit { min-height: 40px; } .pf-qe-x { width: 34px; height: 34px; } .pf-qe-grip { padding: 6px; } }
