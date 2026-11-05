@@ -5,6 +5,7 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
+import * as stScript from '../../../../script.js';   // isGenerating 은 판마다 있을 수도 없을 수도 있어서 이름공간으로
 import { oai_settings, promptManager } from '../../../openai.js';
 import { POPUP_TYPE, callGenericPopup } from '../../../popup.js';
 import { escapeHtml, download, getFileText } from '../../../utils.js';
@@ -759,6 +760,114 @@ function makeTree(groups) {
     return { byId, parentOf, childrenOf, isDescendant, allItems, path, indexOf, topIndexOf, tops };
 }
 
+// ---------- 토글 즉시 반영 ----------
+// 실리태번은 토글을 누르면 토큰 세기용 시험 생성(긴 채팅이면 0.3~0.5초)을 끝낸 뒤에야 목록 전체를 다시 그리고,
+// 우리는 그걸 받아 그룹을 다시 지었음 → 누를 때마다 1초 가까이 멈춤. 이제 켬/끔은 그 자리에서만 바꾸고 저장은 실리태번 함수로,
+// 토큰 수는 마지막으로 누르고 조금 뒤에 한 번만 세서 숫자만 고침.
+const DISABLED = 'completion_prompt_manager_prompt_disabled';
+const liveOn = () => new Map((promptManager?.getPromptOrderForCharacter(promptManager.activeCharacter) || []).map(e => [e.identifier, !!e.enabled]));
+
+/** 그룹 머리 값: 켜진 수 · 모두 켜짐 · 켜진 토큰 · 실제 위치 범위 (줄의 꺼짐 표시 기준) */
+function headState(g, items, rowById, pos) {
+    const isOff = id => rowById.get(id)?.classList.contains(DISABLED);
+    const enabledCount = items.filter(id => !isOff(id)).length;
+    const tokens = items.reduce((sum, id) => {
+        if (isOff(id)) return sum;
+        const t = Number(rowById.get(id)?.querySelector('.prompt_manager_prompt_tokens')?.dataset.pmTokens);
+        return sum + (Number.isFinite(t) ? t : 0);
+    }, 0);
+    const range = items.length ? `#${pos.get(items[0])}${items.length > 1 ? '~#' + pos.get(items[items.length - 1]) : ''}` : tr`no items`;
+    return { enabledCount, allOn: items.length > 0 && enabledCount === items.length, tokens, range };
+}
+
+/** 그룹 머리의 켜짐 수 · 흐림 · 전체 스위치 · 풍선 글을 지금 상태로 */
+function paintHead(head, g, items, rowById, pos, tree) {
+    const { enabledCount, allOn, tokens, range } = headState(g, items, rowById, pos);
+    const subCount = tree.childrenOf(g).length;
+    // 바뀐 것만 씀 — 같은 값을 다시 써도 화면 다시 계산 · 다른 확장의 감시가 돌아서 (토글 하나에 머리 35개를 다 쓰면 0.2초 넘게 걸렸음)
+    const cls = (el, c, v) => { if (el.classList.contains(c) !== v) el.classList.toggle(c, v); };
+    const attr = (el, k, v) => { if (el.getAttribute(k) !== v) el.setAttribute(k, v); };
+    cls(head, 'pf-all-off', !!items.length && !enabledCount);   // 다 꺼진 그룹은 꺼진 토글 줄처럼 흐리게
+    attr(head, 'title', [g.name, tr`On ${enabledCount}/${items.length} · real position ${range}`,
+        subCount ? tr`${subCount} sub-groups` : '', tokens ? tr`Tokens of enabled items: ${tokens}` : ''].filter(Boolean).join('\n'));
+    const count = head.querySelector('.pf-count');
+    const text = `${enabledCount}/${items.length}`;
+    if (count && count.textContent !== text) { if (count.firstChild?.nodeType === Node.TEXT_NODE) count.firstChild.data = text; else count.textContent = text; }
+    const sw = head.querySelector('.pf-toggle-all');
+    if (sw) {
+        const on = g.exclusive ? enabledCount > 0 : allOn;
+        cls(sw, 'fa-toggle-on', on);
+        cls(sw, 'fa-toggle-off', !on);
+        cls(sw, 'pf-btn-idle', !!g.exclusive && !enabledCount);
+        attr(sw, 'title', g.exclusive ? (enabledCount ? tr`Turn the whole group off` : tr`Turn one toggle on from inside the group`) : (allOn ? tr`Turn the whole group off` : tr`Turn the whole group on`));
+    }
+}
+
+/** 줄(원래 줄 · 그룹 안 복사본)과 그룹 머리를 지금 켬/끔 상태로 — 목록을 다시 그리지 않음 */
+function paintStates() {
+    const list = document.getElementById(LIST_ID);
+    if (!list || !promptManager?.activeCharacter) return;
+    const on = liveOn();
+    list.querySelectorAll(`${ROW_SEL}, li.pf-clone[data-pf-id]`).forEach(row => {
+        const id = row.dataset.pmIdentifier || row.dataset.pfId;
+        if (!on.has(id)) return;
+        const v = on.get(id);
+        if (row.classList.contains(DISABLED) === v) row.classList.toggle(DISABLED, !v);
+        const t = row.querySelector('.prompt-manager-toggle-action');
+        if (t && t.classList.contains('fa-toggle-on') !== v) { t.classList.toggle('fa-toggle-on', v); t.classList.toggle('fa-toggle-off', !v); }
+    });
+    const heads = list.querySelectorAll('li.pf-group > .pf-group-head');
+    if (!heads.length) return;
+    const rows = [...list.querySelectorAll(ROW_SEL)];
+    const rowById = new Map(rows.map(r => [r.dataset.pmIdentifier, r]));
+    const pos = new Map(rows.map((r, i) => [r.dataset.pmIdentifier, i + 1]));
+    const groups = presetData().groups, tree = makeTree(groups);
+    heads.forEach(head => {
+        const g = groups.find(x => x.id === head.parentElement.dataset.pfGroup);
+        if (!g) return;
+        const items = tree.allItems(g).filter(id => rowById.has(id)).sort((a, b) => pos.get(a) - pos.get(b));
+        paintHead(head, g, items, rowById, pos, tree);
+    });
+}
+
+let tokenTimer = null;
+/** 켬/끔을 바꾼 뒤: 화면은 바로, 저장은 실리태번 함수로(설정 저장 이벤트를 다른 확장도 받음), 토큰 수는 조금 뒤 한 번 */
+function commitToggles(ids = []) {
+    const counts = promptManager?.tokenHandler?.getCounts?.();
+    if (counts) ids.forEach(id => { counts[id] = null; });
+    paintStates();
+    promptManager?.saveServiceSettings();
+    clearTimeout(tokenTimer);
+    tokenTimer = setTimeout(recountTokens, 800);
+}
+
+/** 토큰 수만 다시 세어 숫자만 고침 (생성 중이면 실리태번에 맡김 — 끝난 뒤 알아서 다시 그림) */
+async function recountTokens() {
+    const pm = promptManager;
+    if (!pm?.activeCharacter) return;
+    if (drag?.started) { tokenTimer = setTimeout(recountTokens, 800); return; }
+    if (typeof stScript.isGenerating !== 'function' || stScript.isGenerating()) return void pm.render();
+    try { await pm.tryGenerate(); } catch (err) { console.warn('[Prompt Folders] token count', err); return void pm.render(); }
+    const list = document.getElementById(LIST_ID);
+    if (!list) return;
+    const counts = pm.tokenHandler?.getCounts?.() || {};
+    list.querySelectorAll(`${ROW_SEL}, li.pf-clone[data-pf-id]`).forEach(row => {
+        const id = row.dataset.pmIdentifier || row.dataset.pfId;
+        const el = row.querySelector('.prompt_manager_prompt_tokens');
+        if (!el) return;
+        const v = String(counts[id] || '-');
+        if (el.dataset.pmTokens === v) return;
+        el.dataset.pmTokens = v;
+        const last = el.lastChild;
+        if (last?.nodeType === Node.TEXT_NODE) last.textContent = v; else el.append(v);
+    });
+    // 맨 위 「총 토큰」 숫자
+    const total = document.querySelector(`#${CONTAINER_ID} .completion_prompt_manager_header > div:last-child`);
+    const tn = total && [...total.childNodes].reverse().find(n => n.nodeType === Node.TEXT_NODE && /\d/.test(n.textContent));
+    if (tn) tn.textContent = ` ${pm.tokenUsage} `;
+    paintStates();   // 그룹 머리 풍선의 토큰 합도
+}
+
 function buildGroup(g, ctx, depth) {
     const { rowById, pos, tree } = ctx;
     const gi = tree.indexOf(g);
@@ -771,22 +880,12 @@ function buildGroup(g, ctx, depth) {
     li.dataset.pfGroup = g.id;
     li.style.setProperty('--pf-color', groupColor(g, gi, tree));
 
-    const isOff = id => rowById.get(id).classList.contains('completion_prompt_manager_prompt_disabled');
-    const enabledCount = items.filter(id => !isOff(id)).length;
-    const tokens = items.reduce((sum, id) => {
-        if (isOff(id)) return sum;
-        const t = Number(rowById.get(id).querySelector('.prompt_manager_prompt_tokens')?.dataset.pmTokens);
-        return sum + (Number.isFinite(t) ? t : 0);
-    }, 0);
-    const range = items.length ? `#${pos.get(items[0])}${items.length > 1 ? '~#' + pos.get(items[items.length - 1]) : ''}` : tr`no items`;
-    const allOn = items.length > 0 && enabledCount === items.length;
+    const { enabledCount, allOn, range } = headState(g, items, rowById, pos, tree);
     const exclusive = !!g.exclusive;
     const subCount = tree.childrenOf(g).length;
 
     const head = document.createElement('div');
-    head.className = 'pf-group-head' + (items.length && !enabledCount ? ' pf-all-off' : '');   // 다 꺼진 그룹은 꺼진 토글 줄처럼 흐리게
-    head.title = [g.name, tr`On ${enabledCount}/${items.length} · real position ${range}`,
-        subCount ? tr`${subCount} sub-groups` : '', tokens ? tr`Tokens of enabled items: ${tokens}` : ''].filter(Boolean).join('\n');
+    head.className = 'pf-group-head';
     head.setAttribute('role', 'button');
     head.setAttribute('aria-expanded', String(open));
     head.tabIndex = 0;
@@ -800,6 +899,7 @@ function buildGroup(g, ctx, depth) {
         ? `<span class="pf-btn pf-toggle-all fa-solid ${enabledCount ? 'fa-toggle-on' : 'fa-toggle-off pf-btn-idle'}" role="button" title="${escapeHtml(enabledCount ? tr`Turn the whole group off` : tr`Turn one toggle on from inside the group`)}"></span>`
         : `<span class="pf-btn pf-toggle-all fa-solid ${allOn ? 'fa-toggle-on' : 'fa-toggle-off'}" role="button" title="${escapeHtml(allOn ? tr`Turn the whole group off` : tr`Turn the whole group on`)}"></span>`}
         <span class="pf-btn pf-more fa-solid fa-ellipsis-vertical" role="button" title="${escapeHtml(tr`Group menu`)}"></span>`;
+    paintHead(head, g, items, rowById, pos, tree);
     li.append(head);
 
     // 열고 닫기는 목록을 다시 그리지 않고 이 그룹만 바꿈(접힌 그룹도 안은 그려 둠)
@@ -812,9 +912,11 @@ function buildGroup(g, ctx, depth) {
     head.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === head) { e.preventDefault(); toggleOpen(); } });
     head.querySelector('.pf-toggle-all').addEventListener('click', () => {
         const snap = takeSnap();
-        if (exclusive) { if (enabledCount) { toggleAll(items, false); offerRestore(snap, tr`Turned off "${g.name}".`); } return; }
-        toggleAll(items, !allOn);
-        offerRestore(snap, allOn ? tr`Turned off "${g.name}".` : tr`Turned on all of "${g.name}".`);
+        const live = liveOn();
+        const n = items.filter(id => live.get(id)).length, every = items.length > 0 && n === items.length;
+        if (exclusive) { if (n) { toggleAll(items, false); offerRestore(snap, tr`Turned off "${g.name}".`); } return; }
+        toggleAll(items, !every);
+        offerRestore(snap, every ? tr`Turned off "${g.name}".` : tr`Turned on all of "${g.name}".`);
     });
     head.querySelector('.pf-more').addEventListener('click', e => openGroupMenu(g, e.currentTarget, range));
     // 머리의 「택1」을 바로 눌러 켜고 끔 (편집 창 · 메뉴를 거치지 않음)
@@ -987,8 +1089,24 @@ function openToolsMenu(anchor) {
 // 3) 단계: 장식이 눈에 띄게 많은 구분선이 큰 구역, 적은 구분선은 그 안의 하위 구역. 글자가 같은 두 번째 구분선은 그 구역을 닫음
 const ST_MARKERS = new Set(['main', 'nsfw', 'jailbreak', 'chatHistory', 'worldInfoBefore', 'worldInfoAfter', 'dialogueExamples', 'charDescription', 'charPersonality', 'scenario', 'personaDescription', 'enhanceDefinitions']);
 const segmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
-const graphemes = s => (segmenter ? Array.from(segmenter.segment(s), x => x.segment) : Array.from(s));
+// 글자 나누기(Intl.Segmenter)가 자동 그룹 계산 시간의 대부분이라 같은 글은 한 번만 나눔 (돌려줄 땐 복사본 — 받은 쪽이 뒤집어도 괜찮게)
+const graphemeCache = new Map();
+const graphemes = s => {
+    s = String(s);
+    let g = graphemeCache.get(s);
+    if (!g) {
+        if (graphemeCache.size > 20000) graphemeCache.clear();
+        g = segmenter ? Array.from(segmenter.segment(s), x => x.segment) : Array.from(s);
+        graphemeCache.set(s, g);
+    }
+    return g.slice();
+};
 const isWordG = g => /[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N}]/u.test(g);   // ﾟ 같은 수식 기호(Lm)는 글자가 아님
+// 한자 · 가나는 낱말 사이 띄어쓰기가 없어 글자마다 끊을 수 있음 (①② 같은 동그라미 숫자도)
+const isCJ = g => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{No}]/u.test(g);
+const glued = (a, b) => isWordG(a) && isWordG(b) && !isCJ(a) && !isCJ(b);
+// 끝 표시 말: end · 종료 · 结束 · 終了, 「끝」은 글자 맨 끝에 올 때만 (끝맺음 · 끝없는 은 아님)
+const END_WORD = /\bend\b|종료|结束|終了|끝(?=[^\p{L}\p{N}]*$)/iu;
 const isDecoG = g => /\p{Extended_Pictographic}/u.test(g) || (/\p{S}/u.test(g) && /[^\x00-\x7F]/.test(g));
 const lettersOnly = s => String(s || '').replace(/\{\{[^}]*\}\}/g, '').replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
 const contentLen = p => String(p?.content || '').replace(/\{\{\/\/[\s\S]*?\}\}/g, '').trim().length;
@@ -1014,13 +1132,16 @@ function findHeaders(order, getPrompt) {
         if ((s.words === 0 && s.deco >= 2) || s.maxRun >= 3 || (contentLen(p) === 0 && s.deco >= 1)) headers.set(id, s.deco);
     }
     // 글자가 같은 이름 둘(시작·끝 짝)이 둘 다 내용이 거의 없으면 구분선
-    const byText = new Map();
-    candidates.forEach(id => {
+    const byText = new Map(), twins = new Set();
+    // 실리태번 기본 자리(카드 · 채팅 자리 표시는 빼고)를 이름만 바꿔 구역 머리로 쓰는 프리셋도 있어서 그것도 봄
+    order.map(e => e.identifier).filter(id => getPrompt(id) && !getPrompt(id).marker).forEach(id => {
         const t = lettersOnly(getPrompt(id).name);
         if (t) byText.set(t, [...(byText.get(t) || []), id]);
     });
     byText.forEach(ids => {
-        if (ids.length === 2 && ids.some(id => decoShape(getPrompt(id).name).deco > 0) && ids.every(id => headers.has(id) || contentLen(getPrompt(id)) < 40)) ids.forEach(id => headers.set(id, Math.max(1, decoShape(getPrompt(id).name).deco)));
+        // 뒤의 것(끝 표시)은 거의 비고(40자 미만) 앞의 것(구역 머리)도 짧으면(300자 미만) 짝 — 「머리 + 같은 이름의 본문」은 짝이 아님
+        const lens = ids.map(id => (headers.has(id) ? 0 : contentLen(getPrompt(id))));
+        if (ids.length === 2 && ids.some(id => decoShape(getPrompt(id).name).deco > 0) && lens[1] < 40 && lens[0] < 300) ids.forEach(id => { headers.set(id, Math.max(1, decoShape(getPrompt(id).name).deco)); twins.add(id); });
     });
     // 같은 이모지로 시작하는 내용 없는 항목이 3개 넘게 이어지면(🚫 Never · 🚫 Gonna …) 구분선이 아니라 한 묶음
     for (let i = 0; i < candidates.length;) {
@@ -1039,7 +1160,9 @@ function findHeaders(order, getPrompt) {
     });
     // 시작 · 끝 짝: ⤵ … ⤴, <tag> … </tag>, start/시작 … end/끝 — 짝이 맞는 것만
     headers.pairs = new Map(); headers.depth = new Map();
-    const stack = [];
+    const stack = [], wrapped = [];
+    // 앞뒤를 같은 장식으로 감싼 이름(★…★): 장식 두 개
+    const wrapOf = n => { const gs = graphemes(String(n || '').trim()); return gs.length > 2 && isDecoG(gs[0]) && isDecoG(gs.at(-1)) ? gs[0] + gs.at(-1) : ''; };
     const bare = n => String(n || '').replace(/[\u2934\u2935\uFE0F]/gu, '').trim();
     const pairKey = n => lettersOnly(bare(n).replace(/\b(?:start|begin|end)\b|시작|종료|끝|开始|结束|開始|終了/gi, ''));
     // 실리태번 기본 자리를 이름만 바꿔 끝 표시로 쓰는 프리셋도 있어서 짝은 목록 전체에서 찾음
@@ -1048,14 +1171,33 @@ function findHeaders(order, getPrompt) {
         const close = /\u2934/u.test(n) || /^<\/[A-Za-z][\w-]*\s*>$/.test(b) || /\bend\b|종료|끝|结束|終了/i.test(b);
         const open = !close && (/\u2935/u.test(n) || /^<[A-Za-z][\w-]*\b[^>]*>$/.test(b) || /\b(?:start|begin)\b|시작|开始|開始/i.test(b));
         if (open) { headers.depth.set(id, stack.length); stack.push(id); continue; }
-        if (!close || !stack.length) continue;
+        if (!close) { if (wrapOf(n) && !headers.has(id) && contentLen(getPrompt(id)) < 300) wrapped.push(id); continue; }
         let k = stack.length - 1;
         while (k >= 0 && pairKey(getPrompt(stack[k]).name) !== pairKey(n)) k--;
-        if (k < 0 && /\u2934/u.test(n) && /\u2935/u.test(getPrompt(stack[stack.length - 1]).name)) k = stack.length - 1;
-        if (k < 0) continue;
-        headers.pairs.set(id, stack[k]);
-        stack.splice(k);
+        if (k < 0 && stack.length && /\u2934/u.test(n) && /\u2935/u.test(getPrompt(stack[stack.length - 1]).name)) k = stack.length - 1;
+        if (k >= 0) { headers.pairs.set(id, stack[k]); stack.splice(k); continue; }
+        // 짝 말(시작)이 없는 끝 표시: 바로 위에서 같은 장식으로 감싼 항목이 시작 (★문체 고르기★ … ★문체 끝★)
+        // (이미 구분선으로 보인 항목은 제 구역이 따로 있어서 빼고, 같은 말이 있는 것을 먼저)
+        const w = wrapOf(n), same = x => wrapOf(getPrompt(x).name) === w;
+        let m = w && contentLen(getPrompt(id)) < 40 ? wrapped.findLastIndex(x => same(x) && pairKey(getPrompt(x).name) === pairKey(n)) : -1;
+        // 말이 달라도(★설정★ … ★세계 끝★) 바로 위의 것이면 짝 — 그 사이에 다른 구분선이 있으면 아님
+        if (m < 0 && w && contentLen(getPrompt(id)) < 40) {
+            m = wrapped.findLastIndex(same);
+            const ids = order.map(e => e.identifier), from = m >= 0 ? ids.indexOf(wrapped[m]) : -1;
+            if (m >= 0 && ids.slice(from + 1, ids.indexOf(id)).some(x => headers.has(x))) m = -1;
+        }
+        if (m >= 0) { headers.pairs.set(id, wrapped[m]); wrapped.splice(m); }
     }
+    // 짝 표시(시작 · 끝)에 쓰인 장식으로 시작하는 짧은 항목도 구역 머리 (예: 「분위기🔻」 · 「분위기🔺」 짝이 있으면 「🔻 기본 규칙」도 머리)
+    const marks = new Set([...twins, ...headers.pairs.keys(), ...headers.pairs.values()].flatMap(id => graphemes(String(getPrompt(id).name || '')).filter(isDecoG)));
+    const leadOf = id => graphemes(String(getPrompt(id).name || '').trim())[0];
+    const bullets = new Map();
+    candidates.forEach(id => { if (!headers.has(id)) bullets.set(leadOf(id), (bullets.get(leadOf(id)) || 0) + 1); });
+    candidates.forEach(id => {
+        if (headers.has(id)) return;
+        const p = getPrompt(id), sh = decoShape(p.name), lead = leadOf(id);
+        if (marks.has(lead) && bullets.get(lead) <= 2 && sh.words > 0 && contentLen(p) < 120 && !END_WORD.test(bare(p.name))) headers.set(id, sh.deco);
+    });
     // 깊이는 짝이 맞은 구역끼리만 셈 (끝이 없는 「시작」은 무시)
     const pos = new Map(order.map((e, i) => [e.identifier, i]));
     const spans = [...headers.pairs].map(([c, o]) => [pos.get(o), pos.get(c), o]);
@@ -1097,7 +1239,7 @@ function commonPrefix(a, b) {
     const x = graphemes(a), y = graphemes(b);
     let i = 0;
     while (i < x.length && i < y.length && x[i] === y[i]) i++;
-    while (i > 0 && ((i < x.length && isWordG(x[i]) && isWordG(x[i - 1])) || (i < y.length && isWordG(y[i]) && isWordG(y[i - 1])))) i--;
+    while (i > 0 && ((i < x.length && glued(x[i - 1], x[i])) || (i < y.length && glued(y[i - 1], y[i])))) i--;
     return x.slice(0, i).join('');
 }
 const runName = p => { const t = balanced(p.replace(/\{\{[^}]*$/u, '').trim(), true); return t && balanced(t.replace(/^[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E\s]+/u, '').trim()); };
@@ -1108,20 +1250,23 @@ const usefulName = n => graphemes(n).filter(isWordG).length >= 2 || (graphemes(n
 function commonSuffix(names) {
     const rev = n => graphemes(n).reverse();
     const xs = names.map(rev);
+    if (!xs.length) return '';   // 빈 목록이면 아래 every 가 늘 참이라 끝나지 않음
     let i = 0;
     while (xs.every(x => i < x.length && x[i] === xs[0][i])) i++;
-    while (i > 0 && xs.some(x => i < x.length && isWordG(x[i]) && isWordG(x[i - 1]))) i--;
+    while (i > 0 && xs.some(x => i < x.length && glued(x[i], x[i - 1]))) i--;
     return xs[0].slice(0, i).reverse().join('').trim();
 }
 
 /** 이모지만 남은 묶음 이름: 이름들의 공통 끝부분(감싼 괄호 벗김)을 붙임 */
 function betterRunName(name, members, nameOf) {
-    if (graphemes(name).some(isWordG)) return name;
+    const words = graphemes(name).filter(isWordG).length;
+    if (words >= 2) return name;
     let tail = commonSuffix(members.map(nameOf));
     const m = tail.match(/^[([{（【「](.*)[)\]}）】」]$/u);
     if (m) tail = m[1].trim();
     tail = balanced(tail, true);
-    return tail && graphemes(tail).filter(isWordG).length >= 2 ? `${name} ${tail}` : name;
+    if (!tail || graphemes(tail).filter(isWordG).length < 2) return name;
+    return words ? `${graphemes(name).filter(g => !isWordG(g)).join('').trim()} ${tail}`.trim() : `${name} ${tail}`;
 }
 
 /** 이름 모양: 앞 장식·이모지를 떼고 「이름표:」 의 이름표 (예: '⛓️ 선택: 강압' → '선택'). 이름표가 없으면 '' */
@@ -1139,15 +1284,17 @@ function nameRuns(ids, nameOf, minInSection = 0) {
     let i = 0;
     while (i < ids.length) {
         if (ST_MARKERS.has(ids[i])) { i++; continue; }
-        let pre = nameOf(ids[i]), j = i + 1;
+        let pre = nameOf(ids[i]), j = i + 1, cut = null;
         for (; j < ids.length; j++) {
             if (ST_MARKERS.has(ids[j])) break;
             const next = commonPrefix(pre, nameOf(ids[j]));
             if (!usefulName(runName(next))) break;
-            // 뚜렷한 머리말(낱말 2개 이상)로 2개 이상 묶였는데 이모지만 남게 되면 거기서 끊음
-            if (j - i >= 2 && strongName(runName(pre)) && !graphemes(runName(next)).some(isWordG)) break;
+            // 뚜렷한 머리말(낱말 2개 이상)로 2개 이상 묶였는데 이모지만 남게 되는 자리
+            if (!cut && j - i >= 2 && strongName(runName(pre)) && !graphemes(runName(next)).some(isWordG)) cut = { j, pre };
             pre = next;
         }
+        // 뒤에 남는 것이 따로 묶일 만큼(3개) 되면 그 자리에서 끊고, 아니면 이모지 하나로 다 같이 (⭐ 기본 A · ⭐ 기본 B · ⭐ 대화 · ⭐ 짧은 문단)
+        if (cut && j - cut.j >= 3) ({ j, pre } = cut);
         const name = runName(pre);
         const need = minInSection || (strongName(name) ? 2 : 3);
         if (j - i >= need && usefulName(name)) { runs.push({ name: betterRunName(name, ids.slice(i, j), nameOf), members: ids.slice(i, j) }); i = j; continue; }
@@ -1184,6 +1331,7 @@ function planAutoGroups(order, getPrompt) {
     let top = null, sub = null, loose = [];
     const sections = [];
     const flushLoose = () => { if (loose.length) sections.push({ loose }); loose = []; };
+    const isEnd = id => END_WORD.test(nameOf(id));
     const sameText = (a, b) => { const t = lettersOnly(nameOf(a)); return !!t && t === lettersOnly(nameOf(b)); };
     for (const e of order) {
         const id = e.identifier;
@@ -1199,6 +1347,7 @@ function planAutoGroups(order, getPrompt) {
             continue;
         }
         if (sub && sameText(id, sub.header)) { sub.members.push(id); sub = null; continue; }
+        if (top && isEnd(id)) { top.members.push(id); top = sub = null; continue; }
         if (top && sameText(id, top.header)) { top.members.push(id); top = sub = null; continue; }
         if (isBig(id) || !top) {
             flushLoose();
@@ -1265,9 +1414,120 @@ function planAutoGroups(order, getPrompt) {
         seen.set(n.name, count);
         if (count === 1) continue;
         const leads = [...new Set(n.members.map(id => graphemes(nameOf(id))[0]).filter(g => /\p{Extended_Pictographic}|\p{RI}/u.test(g)))];
-        n.name = leads.length && leads.length <= 3 ? `${leads.join('')} ${n.name}` : `${n.name} ${count}`;
+        n.name = leads.length && leads.length <= 3 && !LEAD_EMOJI.test(n.name) ? `${leads.join('')} ${n.name}` : `${n.name} ${count}`;
     }
     return out;
+}
+
+/** 이름이 닮았는지: 낱말 단위 공통 앞부분 · 끝부분 · 이름표가 뚜렷하면 그 글자 수 (아니면 0) */
+function kinScore(a, b) {
+    const words = t => graphemes(t).filter(isWordG).length;
+    const cj = graphemes(a).some(isCJ);
+    const raw = commonPrefix(a, b).replace(/[\s([{（【「\-–—|｜:：·_/]+$/u, ''), pre = runName(raw), post = runName(commonSuffix([a, b])), key = labelKey(a);
+    // 한자는 띄어쓰기가 없어서 앞부분 뒤에 끊는 자리(기호 · 숫자 · 끝 · 다른 글자)가 있어야 함 — 「设定|文风」 · 「设定|角色」처럼 두 글자만 같고 바로 글자가 이어지면 아님
+    const n = graphemes(raw).length;
+    const edge = t => { const g = graphemes(t)[n], q = graphemes(t)[n - 1]; return !g || !isWordG(g) || /\p{N}/u.test(g) || isCJ(g) !== isCJ(q ?? ''); };
+    // 띄어 쓰는 말(영어 · 한국어)은 낱말 두 개 이상이 같아야 (Anti-… · …Style 같은 한 낱말은 흔해서 아님)
+    const tokens = t => t.split(/[\s\-–—_/|｜:：·]+/u).filter(x => graphemes(x).some(isWordG)).length;
+    const p = cj ? (words(pre) >= 2 && (edge(a) || edge(b)) ? words(pre) : 0) : (tokens(pre) >= 2 ? words(pre) : 0);
+    const s = cj && words(post) >= 3 && post !== a && post !== b ? words(post) : 0;
+    const k = key && key === labelKey(b) ? words(key) : 0;
+    return Math.max(p, s, k);
+}
+
+/**
+ * 「그룹 없는 토글만」: 남은 토글을 먼저 지금 그룹에 넣음 → { groups, into: Map(토글 → { group, why }), rest: [남은 토글] }
+ * 토글마다 후보 그룹(앞 · 뒤 이웃 그룹, 이름이 닮은 토글의 그룹, 같은 구역 토글의 그룹)에 점수를 매겨 뚜렷이 앞서는 것만 넣음:
+ * 앞 · 뒤 이웃, 이름 닮음, 이름 모양(「 」 · ! ! 같은 꾸밈) 같음, 자동 묶음 계획의 같은 구역. 넣은 것은 다음 토글의 이웃이 됨.
+ */
+function fitIntoGroups(order, groups, plan, nameOf, dividers = new Set(), W = {}) {
+    const w = { near: 1.5, far: 1, head: 0.3, kin: 3, shape: 2, sub: 1.5, top: 0.5, need: 3, gap: 1, win: 3, pf: 3, tail: 1, ...W };
+    const out = structuredClone(groups);
+    const ids = order.map(e => e.identifier ?? e);
+    const at = new Map(ids.map((id, i) => [id, i]));
+    const home = new Map();
+    out.forEach(g => g.members.forEach(id => { if (!home.has(id)) home.set(id, g); }));
+    const into = new Map();
+    const memo = f => { const m = new Map(); return id => (m.has(id) ? m.get(id) : (m.set(id, f(id)), m.get(id))); };
+    // 이름 모양: 글자를 빼고 남은 꾸밈 (「 Lite 」 → 「」, ! 영어 ! → !!)
+    const shapeOf = memo(id => graphemes(nameOf(id)).filter(g => !isWordG(g) && !/\s/u.test(g)).join(''));
+    const subOf = new Map(), topOf = new Map();
+    plan.forEach((n, i) => {
+        [...n.members, ...(n.children || []).flatMap(c => c.members)].forEach(id => topOf.set(id, i));
+        (n.children || []).forEach((c, j) => c.members.forEach(id => subOf.set(id, `${i}.${j}`)));
+        n.members.forEach(id => { if (!subOf.has(id)) subOf.set(id, `${i}`); });
+    });
+    // 구역마다 토글 목록 (토글마다 목록 전체를 다시 훑지 않게)
+    const listOf = (map) => { const m = new Map(); ids.forEach(y => { const k = map.get(y); if (k != null) { if (!m.has(k)) m.set(k, []); m.get(k).push(y); } }); return m; };
+    const subIds = listOf(subOf), topIds = listOf(topOf);
+    const grouped0 = ids.filter(id => home.has(id));
+    const kinOf = memo(id => {
+        if (dividers.has(id) || ST_MARKERS.has(id)) return null;
+        let best = null;
+        for (const y of grouped0) {
+            const s = kinScore(nameOf(id), nameOf(y));
+            if (!s) continue;
+            const d = Math.abs(at.get(id) - at.get(y));
+            if (!best || s > best.s || (s === best.s && d < best.d)) best = { s, d, g: home.get(y) };
+        }
+        return best?.g || null;
+    });
+    const scoreFor = id => {
+        const i = at.get(id), score = new Map(), why = new Map();
+        const add = (g, v, k) => { if (!g || !v) return; score.set(g, (score.get(g) || 0) + v); if (!why.has(g) || v >= 1.5) why.set(g, k); };
+        let p = i - 1, q = i + 1;
+        while (p >= 0 && !home.has(ids[p])) p--;
+        while (q < ids.length && !home.has(ids[q])) q++;
+        const P = p >= 0 ? home.get(ids[p]) : null, N = q < ids.length ? home.get(ids[q]) : null;
+        // 이웃 그룹이 그 근처(앞 · 뒤 그룹 토글 몇 개)에서 대부분이 아니면(뜻으로 섞어 묶은 곳) 이웃 점수를 그만큼 낮춤
+        // (앞 이웃은 앞쪽 그룹 토글 w.win 개, 뒤 이웃은 뒤쪽 w.win 개 가운데 그 그룹 비율)
+        const side = (from, step) => { const got = []; for (let k = from; k >= 0 && k < ids.length && got.length < w.win; k += step) if (home.has(ids[k])) got.push(home.get(ids[k])); return got; };
+        const purity = (g, got) => (got.length ? got.filter(x => x === g).length / got.length : 0);
+        // 바로 뒤가 구분선이면 그건 다음 구역의 머리라 약하게
+        if (P) add(P, (i - p <= 2 ? w.near : w.far) * Math.min(1, purity(P, side(p, -1)) * w.pf), 'near');
+        if (N) add(N, (dividers.has(ids[q]) ? w.head : q - i <= 2 ? w.near : w.far) * Math.min(1, purity(N, side(q, 1)) * w.pf), 'near');
+        // 구역 끝: 바로 뒤가 다음 구역 머리(구분선)이고 앞이 한 그룹으로 이어져 있으면 그 그룹의 끝에 붙은 토글
+        if (P && N && P !== N && dividers.has(ids[q]) && !dividers.has(id) && i - p <= 2 && purity(P, side(p, -1)) >= 0.67) add(P, w.tail, 'near');
+        add(kinOf(id), w.kin, 'name');
+        const shape = shapeOf(id);
+        const groupsSeen = new Set([P, N, kinOf(id)].filter(Boolean));
+        const sub = subOf.get(id), top = topOf.get(id);
+        const secCount = new Map(), secTotal = { sub: 0, top: 0 };
+        const tally = (list, key) => {
+            for (const y of list || []) {
+                const g = home.get(y); if (!g || into.has(y)) continue;
+                secTotal[key]++; groupsSeen.add(g);
+                const c = secCount.get(g) || { sub: 0, top: 0 }; c[key]++; secCount.set(g, c);
+            }
+        };
+        if (sub != null) tally(subIds.get(sub), 'sub');
+        if (top != null) tally(topIds.get(top), 'top');
+        for (const g of groupsSeen) {
+            const c = secCount.get(g);
+            if (c && secTotal.sub) add(g, w.sub * c.sub / secTotal.sub, 'section');
+            if (c && secTotal.top) add(g, w.top * c.top / secTotal.top, 'section');
+        }
+        // 이름 모양은 후보 가운데 한 그룹만 그 모양일 때만 (모두 🔹… 이면 가르는 힘이 없음)
+        if (shape) {
+            const frac = [...groupsSeen].map(g => { const ms = g.members.filter(x => !into.has(x)); return [g, ms.length ? ms.filter(x => shapeOf(x) === shape).length / ms.length : 0]; });
+            const hit = frac.filter(([, f]) => f >= 0.5);
+            if (hit.length === 1) add(hit[0][0], w.shape * hit[0][1], 'shape');
+        }
+        const ranked = [...score].sort((a, b) => b[1] - a[1]);
+        const [g, s] = ranked[0] || [];
+        if (!g || s < w.need || (ranked[1] && s - ranked[1][1] < w.gap)) return null;
+        return { g, why: why.get(g) };
+    };
+    for (let again = true; again;) {
+        again = false;
+        for (const id of ids) {
+            if (home.has(id)) continue;
+            const r = scoreFor(id);
+            if (r) { r.g.members.push(id); home.set(id, r.g); into.set(id, { group: r.g.id, why: r.why }); again = true; }
+        }
+    }
+    out.forEach(g => g.members.sort((x, y) => (at.get(x) ?? 1e9) - (at.get(y) ?? 1e9)));
+    return { groups: out, into, rest: ids.filter(id => !home.has(id)) };
 }
 
 // AI 로 묶기: 토글 이름 · 내용 앞부분을 지금 연결된 API 로 한 번 보내 그룹 계획을 받음 (번호로 주고받아 이름이 바뀌어도 안전)
@@ -1279,6 +1539,13 @@ Return ONLY JSON: {"groups":[{"name":"","items":[0,1],"children":[{"name":"","it
 - Prefer neighbouring toggles; each index at most once; toggles that fit nowhere can stay out.
 - At most two levels: 4 to 12 top-level groups, and inside a top-level group put children (sub-folders, at least 2 items each) when it holds two or more distinct sets — e.g. a style category with separate "pick one" sets. Never nest deeper than that.
 - name: short Korean (2–12 characters) starting with one fitting emoji, e.g. "🌐 언어", "🎬 문체".`;
+
+// 「그룹 없는 토글만」에서 기존 그룹을 같이 보낼 때 덧붙이는 지시
+const AI_INTO_PROMPT = `
+The preset already has groups. They come after the toggles, one line per group — G<number> | name | a few of its toggles (names only).
+- First put a toggle into an existing group when it clearly belongs there: {"into":[{"group":"G3","items":[4,5]}]}.
+- Make new groups (the "groups" list) only for toggles that fit no existing group. Don't make a new group that means the same as an existing one.
+Return ONLY JSON: {"into":[...],"groups":[...]}`;
 
 /** 실리태번 연결 프로필 목록 (Connection Manager) */
 const aiProfiles = () => SillyTavern.getContext().extensionSettings.connectionManager?.profiles || [];
@@ -1392,14 +1659,14 @@ function aiTargetLabel() {
 }
 
 /** 처음 쓸 때 무엇을 어디로 보내는지 알림 — 「다시 묻지 않기」 전까지 매번 */
-async function confirmAiSend(count) {
+async function confirmAiSend(count, groupCount = 0) {
     if (settings().aiNoticeOk) return true;
     const e = escapeHtml, root = document.createElement('div');
     root.className = 'pf-ai-notice';
     root.innerHTML = `
         <h3>${e(tr`Before grouping with AI`)}</h3>
         <ul>
-            <li><b>${e(tr`Sent`)}</b> — ${e(tr`the names of ${count} toggles, with their order and on/off state.`)}</li>
+            <li><b>${e(tr`Sent`)}</b> — ${e(tr`the names of ${count} toggles, with their order and on/off state.`)}${groupCount ? ` ${e(tr`Also the names of your ${groupCount} groups, each with up to 3 of its toggle names, so toggles can go into them.`)}` : ''}</li>
             <li><b>${e(tr`Not sent`)}</b> — ${e(tr`the prompt text inside the toggles, your chat, or anything else.`)}</li>
             <li><b>${e(tr`Sent to`)}</b> — ${e(aiTargetLabel())}. ${e(tr`Nothing goes to the extension author or any other server.`)}</li>
         </ul>
@@ -1489,17 +1756,24 @@ function bindAiPickers(root) {
     fillAiPickers(root);
 }
 
-async function aiPlan(order, getPrompt, signal) {
-    const c = SillyTavern.getContext();
+/**
+ * AI 묶음 계획. existing(기존 그룹)을 주면 그룹마다 이름 · 토글 이름 3개까지를 같이 보내 기존 그룹에 먼저 넣게 함
+ * → plan 배열 (기존 그룹에 넣을 것은 plan.into: Map(토글 → 그룹 id))
+ */
+async function aiPlan(order, getPrompt, signal, existing = null) {
     const ids = order.map(x => x.identifier).filter(id => getPrompt(id));
     const lines = ids.map((id, i) => {
         const p = getPrompt(id), on = order.find(x => x.identifier === id)?.enabled;
         // 프롬프트 내용은 보내지 않음 (제작자 글 보호) — 이름만
         return `${i} | ${on ? 'on' : 'off'} | ${String(p.name || '').trim() || '(no name)'}`;
     });
-    const raw = await aiCall(AI_GROUP_PROMPT, lines.join('\n'), signal);
-    let rows;
-    try { rows = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)).groups; } catch { throw new Error(tr`Couldn't read the AI answer. Try again.`); }
+    // 기존 그룹: 토글이 바로 들어 있는 그룹만 (안에 그룹만 있는 큰 그룹은 넣을 곳이 아님)
+    const known = (existing || []).filter(g => g.members?.length);
+    const groupLines = known.map((g, i) => `G${i} | ${String(g.name || '').trim() || '(no name)'} | ${g.members.slice(0, 3).map(id => String(getPrompt(id)?.name ?? '').trim()).filter(Boolean).join(', ')}`);
+    const prompt = known.length ? `${lines.join('\n')}\n\nExisting groups:\n${groupLines.join('\n')}` : lines.join('\n');
+    const raw = await aiCall(known.length ? AI_GROUP_PROMPT + AI_INTO_PROMPT : AI_GROUP_PROMPT, prompt, signal);
+    let rows, intoRows;
+    try { const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)); rows = j.groups; intoRows = j.into; } catch { throw new Error(tr`Couldn't read the AI answer. Try again.`); }
     const used = new Set();
     const take = items => (Array.isArray(items) ? items : []).map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < ids.length && !used.has(i) && used.add(i)).map(i => ids[i]);
     const plan = [];
@@ -1511,7 +1785,14 @@ async function aiPlan(order, getPrompt, signal) {
     }
     const at = new Map(ids.map((id, i) => [id, i]));
     const first = n => Math.min(...[...n.members, ...n.children.flatMap(k => k.members)].map(id => at.get(id)));
-    return plan.sort((a, b) => first(a) - first(b));
+    plan.sort((a, b) => first(a) - first(b));
+    // 기존 그룹에 넣기: 새 그룹에 이미 쓴 번호는 빼고 (한 토글은 한 곳만)
+    plan.into = new Map();
+    for (const r of Array.isArray(intoRows) ? intoRows : []) {
+        const g = known[Number(String(r?.group ?? '').replace(/^G/i, ''))];
+        if (g) take(r?.items).forEach(id => plan.into.set(id, g.id));
+    }
+    return plan;
 }
 
 /** 자동 그룹: 계획을 그룹 편집기에 채워 보여 줌 (고친 뒤 만들기) */
@@ -1688,7 +1969,6 @@ function cloneRow(orig) {
 // ---------------- 하나만 켜기 그룹 ----------------
 // 그룹(하위 포함) 안에서 토글 하나를 켜면 나머지는 자동으로 끔. 언어·시점처럼 「택1」인 묶음용.
 
-const enabledIds = () => new Set((promptManager?.getPromptOrderForCharacter(promptManager.activeCharacter) || []).filter(e => e.enabled).map(e => e.identifier));
 
 function enforceExclusive(before, keepId = null) {
     const pm = promptManager;
@@ -1707,18 +1987,31 @@ function enforceExclusive(before, keepId = null) {
             for (const e of order) if (e.enabled && e.identifier !== id && items.has(e.identifier)) { e.enabled = false; changed++; }
         }
     }
-    if (changed) { pm.render(); pm.saveServiceSettings(); }
+    if (changed) commitToggles();
     return changed;
 }
 
 function setupExclusive() {
     if (window.__pfExclusiveHooked) return;
     window.__pfExclusiveHooked = true;
-    // 토글 단추(원래 줄·그룹 안 복사본 모두)를 누르기 직전 상태를 기억했다가, 실리태번이 바꾼 뒤 비교
+    // 프롬프트 목록의 토글 단추(원래 줄 · 그룹 안 복사본): 실리태번 처리(토큰 세기 → 목록 전체 다시 그리기)를 거치지 않고 바로 바꿈
     document.addEventListener('click', e => {
-        if (!e.target.closest?.('.prompt-manager-toggle-action')) return;
-        const before = enabledIds(), snap = takeSnap();
-        setTimeout(() => { const off = enforceExclusive(before); if (off) offerRestore(snap, tr`Pick-one group: turned off ${off} other toggles.`); }, 0);
+        const btn = e.target.closest?.('.prompt-manager-toggle-action');
+        if (!btn || !btn.closest(`#${LIST_ID}`)) return;
+        const row = btn.closest('li');
+        const id = row?.dataset.pmIdentifier || row?.dataset.pfId;
+        const pm = promptManager;
+        const prompt = id && pm?.getPromptById(id);
+        const entry = prompt && pm.activeCharacter && pm.getPromptOrderEntry(pm.activeCharacter, id);
+        if (!entry || !pm.isPromptToggleAllowed(prompt)) return;   // 모르는 줄은 실리태번에 맡김
+        e.preventDefault();
+        e.stopPropagation();
+        if (suppressClick) return;   // 끌기를 막 끝낸 클릭
+        const snap = takeSnap();
+        entry.enabled = !entry.enabled;
+        commitToggles([id]);
+        // 택1 그룹: 켠 토글 말고 같은 그룹의 다른 토글은 끔
+        if (entry.enabled) { const off = enforceExclusive(new Set(), id); if (off) offerRestore(snap, tr`Pick-one group: turned off ${off} other toggles.`); }
     }, true);
 }
 
@@ -1767,10 +2060,16 @@ function restoreSnap(snap) {
 
 /** 바꾼 뒤 알림 — 누르면 snap 으로 되돌림 */
 function offerRestore(snap, message) {
-    toastr.success(`${escapeHtml(message)} <u>${escapeHtml(tr`Undo`)}</u>`, tr`Prompt Folders`, {
+    // 알림 띄우기가 테마 · 확장에 따라 0.1~0.3초 걸려서, 바뀐 화면을 먼저 그린 다음에 띄움
+    const show = () => toastr.success(`${escapeHtml(message)} <u>${escapeHtml(tr`Undo`)}</u>`, tr`Prompt Folders`, {
         escapeHtml: false, timeOut: 10000, extendedTimeOut: 4000,
         onclick: () => restoreSnap(snap),
     });
+    // (화면을 안 그리는 때 — 숨긴 탭 등 — 에도 뜨게 0.2초 뒤 한 번 더 시도, 알림은 한 번만)
+    let shown = false;
+    const once = () => { if (!shown) { shown = true; show(); } };
+    requestAnimationFrame(() => setTimeout(once, 0));
+    setTimeout(once, 200);
 }
 
 function setAllCollapsed(collapsed) {
@@ -1792,8 +2091,7 @@ function toggleAll(ids, target) {
         entry.enabled = target;
         counts[id] = null;
     });
-    pm.render();
-    pm.saveServiceSettings();
+    commitToggles();
 }
 
 function createGroup(parentId = null) {
@@ -1810,9 +2108,20 @@ function plainName(name) {
     return out || String(name || '');
 }
 
-/** 자동 그룹 계획(큰 그룹 → 작은 그룹, 최대 2단) → 편집기 초안 그룹. free 면 지금 그룹은 두고 그룹 없는 토글만 */
-function planToDraft(plan, mode, existing, nameOf) {
-    const base = mode === 'free' ? structuredClone(existing) : [];
+/**
+ * 자동 그룹 계획(큰 그룹 → 작은 그룹, 최대 2단) → 편집기 초안 { groups, into }.
+ * free 면 지금 그룹은 두고 그룹 없는 토글만 — 먼저 지금 그룹에 넣을 수 있는 것은 넣고(into: 토글 → 그룹 id) 남은 것만 새 그룹으로.
+ * aiInto 가 있으면(AI 가 고른 기존 그룹) 그대로 씀
+ */
+function planToDraft(plan, mode, existing, nameOf, { order = [], dividers, aiInto = null } = {}) {
+    let base = [], into = new Map();
+    if (mode === 'free' && aiInto) {
+        base = structuredClone(existing);
+        const taken = new Set(base.flatMap(g => g.members));
+        aiInto.forEach((gid, id) => { const g = base.find(x => x.id === gid); if (g && !taken.has(id)) { g.members.push(id); taken.add(id); into.set(id, { group: gid, why: 'ai' }); } });
+        const at = new Map(order.map((e, i) => [e.identifier ?? e, i]));
+        base.forEach(g => g.members.sort((x, y) => (at.get(x) ?? 1e9) - (at.get(y) ?? 1e9)));
+    } else if (mode === 'free') ({ groups: base, into } = fitIntoGroups(order, existing, plan, nameOf, dividers));
     const taken = new Set(base.flatMap(g => g.members));
     const free = ids => ids.filter(id => !taken.has(id));
     const nameFor = (n, ids) => (n.name || '').trim() || String(nameOf(ids[1] ?? ids[0] ?? '') || '').trim() || tr`Group ${base.length + 1}`;
@@ -1824,13 +2133,20 @@ function planToDraft(plan, mode, existing, nameOf) {
         const topMembers = [...new Set(free(n.members))].filter(id => !kidIds.has(id));
         if (topMembers.length + kidIds.size < Math.max(least, 1)) continue;
         if (!topMembers.length && !kidsIn.length) continue;
+        // 「그룹 없는 토글만」에서 큰 그룹에 남은 게 거의 없고 하위가 하나뿐이면 2단으로 만들지 않고 한 그룹으로
+        if (mode === 'free' && topMembers.length <= 1 && kidsIn.length === 1) {
+            const ids = [...topMembers, ...kidsIn[0].members].sort((x, y) => order.findIndex(e => (e.identifier ?? e) === x) - order.findIndex(e => (e.identifier ?? e) === y));
+            ids.forEach(id => taken.add(id));
+            base.push({ id: newId(), name: nameFor(n, ids), members: ids, parent: null, collapsed: true, ...(n.exclusive ? { exclusive: true } : {}) });
+            continue;
+        }
         [...topMembers, ...kidIds].forEach(id => taken.add(id));
         const top = { id: newId(), name: '', members: topMembers, parent: null, collapsed: true, ...(n.exclusive ? { exclusive: true } : {}) };
         const kids = kidsIn.map(k => ({ id: newId(), name: plainName(nameFor(k.c, k.members)), members: k.members, parent: top.id, collapsed: true, ...(k.c.exclusive ? { exclusive: true } : {}) }));   // 2단계 폴더 이름엔 앞 이모지 없이
         top.name = nameFor(n, top.members.length ? top.members : kids[0].members);
         base.push(top, ...kids);
     }
-    return base;
+    return { groups: base, into };
 }
 
 /**
@@ -1879,7 +2195,17 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         return head(tr`Other versions of this preset`) + near.map(opt).join('') + head(tr`Other presets`) + rest.map(opt).join('');
     };
     const runImport = () => { const s = impSrc.load(); impRes = remapGroups(s.groups, s.names); return impRes.groups; };
-    let draft = imp ? runImport() : auto ? planToDraft(plan, mode, data.groups, nameOf) : structuredClone(data.groups);
+    // 자동 그룹 초안: 「그룹 없는 토글만」이면 남은 토글을 먼저 기존 그룹에 (fitInto: 토글 → { group, why })
+    const liveOrder = rawOrder.filter(x => getPrompt(x.identifier));
+    let fitInto = new Map();
+    const autoDraft = () => { const r = planToDraft(plan, mode, data.groups, nameOf, { order: liveOrder, dividers: new Set(hdr.keys()), aiInto: plan.into || null }); fitInto = r.into; return r.groups; };
+    let draft = imp ? runImport() : auto ? autoDraft() : structuredClone(data.groups);
+    // 이번에 바뀐 것 표시용: 원래 어느 그룹에 있었는지
+    const origOf = new Map();
+    data.groups.forEach(g => g.members.forEach(id => { if (!origOf.has(id)) origOf.set(id, g.id); }));
+    const isOld = g => data.groups.some(x => x.id === g.id);
+    // (「전부 새로」에선 모두 새 것이라 표시하지 않음 — 「그룹 없는 토글만」일 때만)
+    const movedHere = id => auto && mode === 'free' && (groupOf(id)?.id ?? null) !== (origOf.get(id) ?? null) && !!groupOf(id);
     let sel = focusId;   // 고른 그룹 (토글을 넣을 곳)
     const addGroup = parent => { const g = { id: newId(), name: '', members: [], parent, collapsed: false }; draft.push(g); sel = g.id; return g; };
     if (addNew) addGroup(newParent);
@@ -1911,6 +2237,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
                     <button type="button" class="pf-ed-chip" data-f="all" role="radio">${e(tr`All`)}</button>
                     <button type="button" class="pf-ed-chip" data-f="mine" role="radio">${e(tr`Picked group`)}</button>
                     <button type="button" class="pf-ed-chip" data-f="free" role="radio">${e(tr`Not in a group`)}</button>
+                    ${auto ? `<button type="button" class="pf-ed-chip" data-f="changed" role="radio">${e(tr`Changed this time`)}</button>` : ''}
                 </div>
                 <div class="pf-be-actions">
                     <span class="pf-be-hint">${e(matchMedia('(pointer: coarse)').matches ? tr`Pick many: long-press, then drag` : tr`Pick many: drag · Shift+click for a range`)}</span>
@@ -1926,9 +2253,11 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     const count = root.querySelector('.pf-ed-count'), putBtn = root.querySelector('.pf-be-put'), outBtn = root.querySelector('.pf-be-out');
     const summary = root.querySelector('.pf-ed-summary');
     const setSummary = text => { summary.textContent = text; };
+    // 기존 그룹에 넣은 것 · 새 그룹 수 안내
+    const intoNote = () => { const fresh = draft.filter(g => !isOld(g)).length; return tr`${fitInto.size} leftover toggles go into existing groups and ${fresh} new groups are made. Changes are marked New — pick "Changed this time" to see only them. Fix anything, then create.`; };
     const ungroupedCount = () => { const g = new Set(data.groups.flatMap(x => x.members)); return order.filter(x => !g.has(x.id)).length; };
     const noneLeft = () => auto && mode === 'free' && !ungroupedCount();
-    setSummary(imp ? tr`Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.` : noneLeft() ? tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.` : auto ? (plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
+    setSummary(imp ? tr`Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.` : noneLeft() ? tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.` : auto ? (mode === 'free' && fitInto.size ? intoNote() : plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
 
     const tree = () => makeTree(draft);
     const groupOf = id => draft.find(g => g.members.includes(id)) || null;
@@ -1974,7 +2303,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
                 <span class="pf-be-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span>
                 <span class="pf-be-dot"></span>
                 <input type="text" class="text_pole pf-be-name" value="${e(g.name)}" placeholder="${e(tr`Group name`)}" aria-label="${e(tr`Group name`)}">
-                <span class="pf-be-n">${n}</span>
+                <span class="pf-be-n">${auto && mode === 'free' ? (isOld(g) ? (() => { const k = g.members.filter(id => origOf.get(id) !== g.id).length; return k ? `<span class="pf-new-badge" title="${e(tr`Toggles added to this group this time`)}">+${k}</span>` : ''; })() : `<span class="pf-new-badge pf-new-word" title="${e(tr`A group made this time`)}">${e(tr`New`)}</span>`) : ''}${n}</span>
                 <span class="pf-be-mv"><button type="button" class="pf-be-ic" data-act="up" title="${e(tr`Move group up`)}" aria-label="${e(tr`Move group up`)}"><i class="fa-solid fa-chevron-up"></i></button><button type="button" class="pf-be-ic" data-act="down" title="${e(tr`Move group down`)}" aria-label="${e(tr`Move group down`)}"><i class="fa-solid fa-chevron-down"></i></button></span>
                 <button type="button" class="pf-be-ic" data-act="sub" title="${e(tr`New group inside`)}" aria-label="${e(tr`New group inside`)}"><i class="fa-solid fa-folder-plus"></i></button>
                 <button type="button" class="pf-be-ic${g.exclusive ? ' on' : ''}" data-act="excl" title="${e(tr`Only one on`)}" aria-pressed="${!!g.exclusive}" aria-label="${e(tr`Only one on`)}">${e(tr`Pick 1`)}</button>
@@ -2061,7 +2390,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         li.className = 'pf-ed-row' + (it.divider ? ' pf-ed-div' : '') + (it.on ? '' : ' pf-ed-off');
         li.dataset.id = it.id;
         li.setAttribute('role', 'option');
-        li.innerHTML = `<span class="pf-ed-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span><input type="checkbox" tabindex="-1"><span class="pf-ed-pos">#${it.pos}</span><span class="pf-ed-name-text">${e(it.name)}</span><span class="pf-ed-how" hidden></span><span class="pf-ed-tag"></span>`;
+        li.innerHTML = `<span class="pf-ed-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span><input type="checkbox" tabindex="-1"><span class="pf-ed-pos">#${it.pos}</span><span class="pf-ed-name-text">${e(it.name)}</span><span class="pf-ed-how" hidden></span><span class="pf-new-badge pf-new-word pf-ed-new" hidden>${e(tr`New`)}</span><span class="pf-ed-tag"></span>`;
         list.append(li);
     }
     const rows = [...list.children];
@@ -2075,6 +2404,11 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
             const how = g && impRes?.how[li.dataset.id], hw = li.querySelector('.pf-ed-how');
             hw.hidden = !how;
             hw.textContent = how === 'name' ? tr`by name` : how === 'placed' ? tr`new toggle` : '';
+            // 자동 그룹: 이번에 그룹이 바뀐 토글 — 기존 그룹에 들어감 / 새 그룹
+            const nw = li.querySelector('.pf-ed-new'), moved = movedHere(li.dataset.id);
+            nw.hidden = !moved;
+            if (moved) nw.title = isOld(g) ? tr`Goes into an existing group` : tr`Goes into a new group`;
+            li.classList.toggle('pf-ed-changed', moved);
         });
     }
     const setRow = (li, on) => {
@@ -2171,7 +2505,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         const g = draft.find(x => x.id === sel), mine = new Set(g ? tree().allItems(g) : []);
         rows.forEach((li, i) => {
             const id = order[i].id;
-            const okF = filter === 'all' || (filter === 'mine' ? (sel === '' ? !groupOf(id) : mine.has(id)) : !groupOf(id));
+            const okF = filter === 'all' || (filter === 'changed' ? movedHere(id) : filter === 'mine' ? (sel === '' ? !groupOf(id) : mine.has(id)) : !groupOf(id));
             li.hidden = !okF || (!!q && !order[i].name.toLowerCase().includes(q));
         });
         // 「고른 그룹」 보기: 그 그룹 토글을 그룹 안 순서대로 · 끌어서 순서 바꾸기
@@ -2188,8 +2522,14 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
 
     // 자동 그룹: 그룹 없는 토글만 / 전부 새로 · AI로 다시 묶기 (결과는 이 편집기에 그대로)
     if (auto) {
-        const paintMode = () => root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.m === mode)));
-        root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.addEventListener('click', () => { mode = c.dataset.m; draft = planToDraft(plan, mode, data.groups, nameOf); sel = null; paintMode(); if (noneLeft()) setSummary(tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.`); renderTree(); refreshTags(); refilter(); }));
+        const paintMode = () => {
+            root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.setAttribute('aria-checked', String(c.dataset.m === mode)));
+            // 「이번에 바뀐 것」은 「그룹 없는 토글만」에서만
+            const ch = root.querySelector('.pf-be-filter .pf-ed-chip[data-f="changed"]');
+            if (ch) ch.hidden = mode !== 'free';
+            if (mode !== 'free' && filter === 'changed') filter = 'all';
+        };
+        root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.addEventListener('click', () => { mode = c.dataset.m; draft = autoDraft(); sel = null; paintMode(); setSummary(mode === 'free' && fitInto.size ? intoNote() : plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`); if (noneLeft()) setSummary(tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.`); renderTree(); refreshTags(); refilter(); }));
         paintMode();
         bindAiPickers(root);
         const aiBtn = root.querySelector('.pf-auto-ai-run');
@@ -2201,18 +2541,19 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
             const grouped = new Set(mode === 'free' ? data.groups.flatMap(g => g.members) : []);
             const sendOrder = rawOrder.filter(x => !grouped.has(x.identifier));
             if (sendOrder.filter(x => getPrompt(x.identifier)).length < 2) return void toastr.info(mode === 'free' ? tr`No toggles left outside groups to group.` : tr`AI found nothing to group.`, tr`Prompt Folders`);
-            if (!(await confirmAiSend(sendOrder.filter(x => getPrompt(x.identifier)).length))) return;
+            const known = mode === 'free' ? data.groups.filter(g => g.members.length) : [];
+            if (!(await confirmAiSend(sendOrder.filter(x => getPrompt(x.identifier)).length, known.length))) return;
             running = new AbortController();
             const t0 = Date.now();
             const tick = () => { label.textContent = tr`AI is grouping… ${Math.round((Date.now() - t0) / 1000)}s (click to stop)`; };
             tick(); const timer = setInterval(tick, 1000);
             aiBtn.classList.add('pf-busy');
             try {
-                const next = await aiPlan(sendOrder, getPrompt, running.signal);
-                if (!next.length) { toastr.info(tr`AI found nothing to group.`, tr`Prompt Folders`); return; }
+                const next = await aiPlan(sendOrder, getPrompt, running.signal, mode === 'free' ? data.groups : null);
+                if (!next.length && !next.into?.size) { toastr.info(tr`AI found nothing to group.`, tr`Prompt Folders`); return; }
                 plan = next;   // 고른 방식(그룹 없는 토글만 / 전부 새로)은 그대로
-                draft = planToDraft(plan, mode, data.groups, nameOf); sel = null;
-                setSummary(tr`Grouped by AI. Fix names, move toggles, then create.`);
+                draft = autoDraft(); sel = null;
+                setSummary(mode === 'free' && fitInto.size ? intoNote() : tr`Grouped by AI. Fix names, move toggles, then create.`);
                 renderTree(); refreshTags(); refilter();
             } catch (err) {
                 if (!running?.signal.aborted) toastr.error(`${tr`Regroup with AI`}: ${String(err?.message || err)}`, tr`Prompt Folders`);
@@ -2251,6 +2592,8 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         return void toastr.info(auto ? tr`No new groups to create, so nothing changed.` : tr`Nothing changed.`, tr`Prompt Folders`);
     }
     const madeNew = draft.filter(g => !data.groups.some(x => x.id === g.id)).length;
+    // 「그룹 없는 토글만」: 기존 그룹에 넣은 토글 수 · 새 그룹 수
+    const intoOld = draft.filter(g => isOld(g)).reduce((n, g) => n + g.members.filter(id => origOf.get(id) !== g.id && !origOf.has(id)).length, 0);
     if (auto && mode === 'all' && data.groups.length) {
         const sure = await callGenericPopup(escapeHtml(tr`Remove the current ${data.groups.length} groups of this preset and regroup? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
         if (!sure) return;
@@ -2309,7 +2652,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     settings().view = 'grouped';
     save();
     apply();
-    offerRestore(snap, imp ? tr`Groups imported.` : auto ? tr`${madeNew} groups created.` : tr`Groups saved.`);
+    offerRestore(snap, imp ? tr`Groups imported.` : auto && mode === 'free' ? tr`${intoOld} toggles went into existing groups · ${madeNew} new groups.` : auto ? tr`${madeNew} groups created.` : tr`Groups saved.`);
 }
 
 
@@ -2381,7 +2724,8 @@ function syncRowMetrics() {
     }
     syncRowLook(list);   // 모양은 숨긴 원래 줄로도 잴 수 있어서 그룹이 다 접혀 있어도 잼
     if (!heights.length) return;   // 모두 접혀 있으면 지난 값 그대로
-    list.style.setProperty('--pf-row-h', Math.min(...heights) + 'px');
+    const rowH = Math.min(...heights) + 'px';
+    if (list.style.getPropertyValue('--pf-row-h') !== rowH) list.style.setProperty('--pf-row-h', rowH);
 }
 
 // 테마가 프롬프트 줄을 상자(테두리 · 바탕 · 둥근 모서리)로 그리면 그룹 머리도 같은 상자로 — 안쪽 줄만 테마를 따르고 그룹 머리는 맨글로 보였음
@@ -2402,7 +2746,10 @@ function syncRowLook(list) {
     const boxed = parseFloat(c.borderTopWidth) > 0 && c.borderTopStyle !== 'none' && !clear(c.borderTopColor)
         && parseFloat(d.borderTopWidth) > 0 && d.borderTopStyle !== 'none';   // 테두리는 켜짐 · 꺼짐 둘 다 있으면(선 모양은 달라도) 켜진 줄 모양으로
     const filled = !clear(c.backgroundColor) && c.backgroundColor === d.backgroundColor;
-    const set = (k, v) => v == null ? list.style.removeProperty(k) : list.style.setProperty(k, v);
+    // 읽기를 모두 끝낸 뒤 바뀐 값만 한 번에 씀 — 읽기 · 쓰기를 번갈아 하면 쓸 때마다 화면 배치를 처음부터 다시 계산해서
+    // 긴 채팅이 열려 있을 때 토글 하나 누를 때마다 1초 넘게 멈췄음
+    const vals = new Map();
+    const set = (k, v) => vals.set(k, v);
     set('--pf-row-border', boxed ? `${c.borderTopWidth} ${c.borderTopStyle} ${c.borderTopColor}` : null);
     set('--pf-row-radius', boxed || filled ? c.borderTopLeftRadius : null);
     set('--pf-row-bg', filled ? c.backgroundColor : null);
@@ -2432,6 +2779,10 @@ function syncRowLook(list) {
     const dims = offLook && (!onLook || offLook.color !== onLook.color || offLook.op !== onLook.op);
     set('--pf-off-name', dims ? offLook.color : null);
     set('--pf-off-op', dims ? String(offLook.op) : null);
+    for (const [k, v] of vals) {
+        const cur = list.style.getPropertyValue(k);
+        if (v == null) { if (cur) list.style.removeProperty(k); } else if (cur !== String(v)) list.style.setProperty(k, v);
+    }
 }
 
 function pause() {

@@ -184,5 +184,14 @@
     "No toggles left outside groups to group.": "그룹에 안 든 토글이 없어서 묶을 게 없어요.",
     "No new groups to create, so nothing changed.": "새로 만들 그룹이 없어서 아무것도 바꾸지 않았어요.",
     "Nothing changed.": "바뀐 게 없어요.",
-    "The toggles inside move up into \"${0}\". Groups inside move up one level.": "안에 있는 토글은 지워지지 않고 위 그룹 「${0}」 안으로 올라가요. 안에 있던 그룹도 한 단계 위로 올라가요."
+    "The toggles inside move up into \"${0}\". Groups inside move up one level.": "안에 있는 토글은 지워지지 않고 위 그룹 「${0}」 안으로 올라가요. 안에 있던 그룹도 한 단계 위로 올라가요.",
+    "New": "new",
+    "Changed this time": "이번에 바뀐 것",
+    "Toggles added to this group this time": "이번에 이 그룹에 새로 들어가는 토글 수",
+    "Goes into an existing group": "기존 그룹에 들어가요",
+    "Goes into a new group": "새 그룹에 들어가요",
+    "${0} toggles went into existing groups · ${1} new groups.": "기존 그룹에 토글 ${0}개 · 새 그룹 ${1}개",
+    "${0} leftover toggles go into existing groups and ${1} new groups are made. Changes are marked New — pick \"Changed this time\" to see only them. Fix anything, then create.": "남은 토글 ${0}개는 기존 그룹에 넣고, 새 그룹은 ${1}개 만들어요. 바뀌는 것엔 「new」가 붙어 있고, 「이번에 바뀐 것」을 누르면 그것만 보여요. 고칠 게 있으면 고친 뒤 만들기를 누르세요.",
+    "Also the names of your ${0} groups, each with up to 3 of its toggle names, so toggles can go into them.": "지금 그룹 ${0}개의 이름과 그룹마다 토글 이름 3개까지도 보내요(기존 그룹에 넣을 수 있게).",
+    "A group made this time": "이번에 새로 만드는 그룹"
 }
