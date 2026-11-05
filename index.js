@@ -2045,6 +2045,16 @@ function takeSnap() {
 function restoreSnap(snap) {
     if (presetKey() !== snap.key) return toastr.warning(tr`The preset has changed, so this can't be undone.`, tr`Prompt Folders`);
     const pm = promptManager;
+    // 켬/끔만 바뀐 경우(그룹 스위치 · 택1 · 토글)는 토글 누를 때와 같은 길로 그 자리에서만 되돌림 — 목록 전체를 다시 그리면 되돌리기가 스위치를 다시 누르는 것보다 느렸음
+    const cur = pm?.activeCharacter ? pm.getPromptOrderForCharacter(pm.activeCharacter) || [] : [];
+    if (snap.order && cur.length === snap.order.length && cur.every((x, i) => x.identifier === snap.order[i].identifier)
+        && JSON.stringify(snap.groups) === JSON.stringify(presetData().groups)) {
+        const changed = [];
+        cur.forEach((x, i) => { const want = !!snap.order[i].enabled; if (!!x.enabled !== want) { x.enabled = want; changed.push(x.identifier); } });
+        if (changed.length) commitToggles(changed);
+        toastr.info(tr`Undone.`, tr`Prompt Folders`);
+        return;
+    }
     if (snap.order && pm?.activeCharacter) {
         pm.removePromptOrderForCharacter(pm.activeCharacter);
         pm.addPromptOrderForCharacter(pm.activeCharacter, snap.order.map(e => ({ ...e })));
@@ -2124,26 +2134,29 @@ async function openGroupQuick(g0) {
     const tree = () => makeTree(draft);
 
     const root = document.createElement('div');
-    root.className = 'pf-qe';
+    // 큰 그룹 편집기와 같은 부품(제목 · 그룹 줄 · 목록 상자 · 줄 · 검색칸 · 칩)으로 — 따로 노는 모양이 아니게
+    root.className = 'pf-editor pf-qe';
     root.innerHTML = `
-        <div class="pf-qe-head">
-            <button type="button" class="pf-qe-dot" title="${e(tr`Change color`)}" aria-label="${e(tr`Change color`)}"></button>
-            <input type="text" class="text_pole pf-qe-name" aria-label="${e(tr`Group name`)}" placeholder="${e(tr`Group name`)}">
-            <button type="button" class="pf-qe-one" aria-pressed="false" title="${e(tr`Only one on`)}">${e(tr`Pick 1`)}</button>
+        <h3 class="pf-ed-title">${e(tr`Edit this group`)}</h3>
+        <div class="pf-be-g pf-be-sel pf-qe-head">
+            <button type="button" class="pf-be-dot pf-qe-dot" title="${e(tr`Change color`)}" aria-label="${e(tr`Change color`)}"></button>
+            <input type="text" class="text_pole pf-be-name pf-qe-name" aria-label="${e(tr`Group name`)}" placeholder="${e(tr`Group name`)}">
+            <button type="button" class="pf-be-ic pf-qe-one" aria-pressed="false" title="${e(tr`Only one on`)}">${e(tr`Pick 1`)}</button>
         </div>
         <div class="pf-qe-swatches" hidden></div>
-        <div class="pf-qe-sub"><b>${e(tr`Toggles in this group`)}</b><span class="pf-qe-count"></span></div>
-        <ul class="pf-qe-list"></ul>
         <div class="pf-qe-kids" hidden></div>
-        <div class="pf-ed-bar"><label class="pf-search pf-qe-search"><i class="fa-solid fa-plus"></i><input type="search" placeholder="${e(tr`Add a toggle: type to search`)}" aria-label="${e(tr`Add a toggle`)}"></label></div>
-        <ul class="pf-qe-found" hidden></ul>`;
+        <div class="pf-be-head"><b>${e(tr`Toggles in this group`)} <span class="pf-be-n pf-qe-count"></span></b></div>
+        <ul class="pf-ed-list pf-be-reorder pf-qe-list"></ul>
+        <div class="pf-be-head"><b>${e(tr`Add a toggle`)}</b></div>
+        <div class="pf-ed-bar"><label class="pf-search pf-qe-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="${e(tr`Search toggles`)}" aria-label="${e(tr`Search toggles`)}"></label></div>
+        <ul class="pf-ed-list pf-qe-found"></ul>`;
     const $ = sel => root.querySelector(sel);
     const name = $('.pf-qe-name'), list = $('.pf-qe-list'), found = $('.pf-qe-found'), search = $('.pf-qe-search input');
     name.value = g.name || '';
     name.addEventListener('input', () => { g.name = name.value; });
 
     const paintHead = () => {
-        $('.pf-qe-dot').style.setProperty('--pf-color', groupColor(g, tree().indexOf(g), tree()));
+        $('.pf-qe-head').style.setProperty('--pf-color', groupColor(g, tree().indexOf(g), tree()));
         const one = $('.pf-qe-one');
         one.classList.toggle('on', !!g.exclusive);
         one.setAttribute('aria-pressed', String(!!g.exclusive));
@@ -2162,17 +2175,17 @@ async function openGroupQuick(g0) {
 
     // 이 그룹 토글 (바로 든 것만 — 하위 그룹 것은 아래 하위 그룹 줄로)
     function renderList() {
-        list.innerHTML = g.members.map(id => `<li class="pf-qe-row" data-id="${e(id)}">
-            <span class="pf-qe-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span>
-            <span class="pf-qe-pos">#${(at.get(id) ?? 0) + 1}</span>
-            <span class="pf-qe-text">${e(nameOf(id))}</span>
-            <button type="button" class="pf-qe-x" title="${e(tr`Remove from group`)}" aria-label="${e(tr`Remove from group`)}"><i class="fa-solid fa-xmark"></i></button>
-        </li>`).join('') || `<li class="pf-qe-empty">${e(tree().childrenOf(g).length ? tr`Its toggles are in the groups inside. Add here to put a toggle in this group directly.` : tr`No toggles yet. Add some below.`)}</li>`;
+        list.innerHTML = g.members.map(id => `<li class="pf-ed-row pf-ed-direct pf-qe-row" data-id="${e(id)}">
+            <span class="pf-ed-grip pf-qe-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span>
+            <span class="pf-ed-pos">#${(at.get(id) ?? 0) + 1}</span>
+            <span class="pf-ed-name-text">${e(nameOf(id))}</span>
+            <button type="button" class="pf-be-ic pf-qe-x" title="${e(tr`Remove from group`)}" aria-label="${e(tr`Remove from group`)}"><i class="fa-solid fa-xmark"></i></button>
+        </li>`).join('') || `<li class="pf-be-empty">${e(tree().childrenOf(g).length ? tr`Its toggles are in the groups inside. Add here to put a toggle in this group directly.` : tr`No toggles yet. Add some below.`)}</li>`;
         $('.pf-qe-count').textContent = String(g.members.length);
         const kids = tree().childrenOf(g);
         const kb = $('.pf-qe-kids');
         kb.hidden = !kids.length;
-        kb.innerHTML = kids.length ? `<span>${e(tr`Groups inside`)}</span>` + kids.map(k => `<button type="button" class="pf-qe-kid" data-g="${e(k.id)}">${e(k.name || tr`(no name)`)} <small>${tree().allItems(k).length}</small></button>`).join('') : '';
+        kb.innerHTML = kids.length ? `<span class="pf-qe-kids-label">${e(tr`Groups inside`)}</span>` + kids.map(k => `<button type="button" class="pf-ed-chip pf-qe-kid" data-g="${e(k.id)}">${e(k.name || tr`(no name)`)} <span class="pf-be-n">${tree().allItems(k).length}</span></button>`).join('') : '';
     }
     list.addEventListener('click', ev => {
         const x = ev.target.closest('.pf-qe-x'); if (!x) return;
@@ -2208,16 +2221,13 @@ async function openGroupQuick(g0) {
     // 토글 넣기: 그룹에 안 든 것 먼저, 다른 그룹 것은 그 그룹 이름을 옅게
     function refind() {
         const q = search.value.trim().toLowerCase();
-        if (!q && document.activeElement !== search) { found.hidden = true; return; }
         const mine = new Set(g.members);
         const hits = order.map(x => x.identifier).filter(id => !mine.has(id) && (!q || nameOf(id).toLowerCase().includes(q)))
             .sort((a, b) => (groupOf(a) ? 1 : 0) - (groupOf(b) ? 1 : 0) || byPos(a, b)).slice(0, 40);
-        found.hidden = false;
-        found.innerHTML = hits.map(id => { const o = groupOf(id); return `<li class="pf-qe-hit" data-id="${e(id)}" role="button" tabindex="0"><span class="pf-qe-pos">#${(at.get(id) ?? 0) + 1}</span><span class="pf-qe-text">${e(nameOf(id))}</span>${o ? `<small class="pf-qe-from">${e(o.name || tr`(no name)`)}</small>` : ''}</li>`; }).join('')
-            || `<li class="pf-qe-empty">${e(tr`Nothing found.`)}</li>`;
+        found.innerHTML = hits.map(id => { const o = groupOf(id); return `<li class="pf-ed-row pf-qe-hit" data-id="${e(id)}" role="button" tabindex="0"><i class="fa-solid fa-plus pf-qe-plus"></i><span class="pf-ed-pos">#${(at.get(id) ?? 0) + 1}</span><span class="pf-ed-name-text">${e(nameOf(id))}</span>${o ? `<span class="pf-ed-tag" style="--pf-color:${groupColor(o, tree().indexOf(o), tree())}">${e(o.name || tr`(no name)`)}</span>` : ''}</li>`; }).join('')
+            || `<li class="pf-be-empty">${e(tr`Nothing found.`)}</li>`;
     }
     search.addEventListener('input', refind);
-    search.addEventListener('focus', refind);
     found.addEventListener('click', ev => {
         const li = ev.target.closest('.pf-qe-hit'); if (!li) return;
         const id = li.dataset.id;
@@ -2228,7 +2238,7 @@ async function openGroupQuick(g0) {
     let goKid = null;
     $('.pf-qe-kids').addEventListener('click', ev => { const b = ev.target.closest('.pf-qe-kid'); if (!b) return; goKid = b.dataset.g; root.closest('.popup')?.querySelector('.popup-button-ok')?.click(); });
 
-    paintHead(); renderList();
+    paintHead(); renderList(); refind();
     const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Save`, cancelButton: tr`Cancel`, allowVerticalScrolling: true });
     if (!ok) return;
 

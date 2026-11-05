@@ -195,7 +195,6 @@
     "the names of ${0} toggles and their order.": "토글 ${0}개의 이름과 순서.",
     "Edit this group": "이 그룹 편집",
     "Toggles in this group": "이 그룹 토글",
-    "Add a toggle: type to search": "토글 넣기 — 이름으로 찾기",
     "Add a toggle": "토글 넣기",
     "No toggles yet. Add some below.": "아직 토글이 없어요. 아래에서 넣어 주세요.",
     "Groups inside": "안의 그룹",
