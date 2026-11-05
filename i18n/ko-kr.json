@@ -193,12 +193,5 @@
     "Also the names of your ${0} groups, each with up to 3 of its toggle names, so toggles can go into them.": "지금 그룹 ${0}개의 이름과 그룹마다 토글 이름 3개까지도 보내요(기존 그룹에 넣을 수 있게).",
     "A group made this time": "이번에 새로 만드는 그룹",
     "the names of ${0} toggles and their order.": "토글 ${0}개의 이름과 순서.",
-    "Edit this group": "이 그룹 편집",
-    "Toggles in this group": "이 그룹 토글",
-    "Add a toggle": "토글 넣기",
-    "No toggles yet. Add some below.": "아직 토글이 없어요. 아래에서 넣어 주세요.",
-    "Nothing found.": "찾은 게 없어요.",
-    "Saved \"${0}\".": "「${0}」을(를) 저장했어요.",
-    "\"${0}\" was empty, so it was ungrouped.": "「${0}」이(가) 비어서 그룹을 풀었어요.",
-    "Into: ${0}": "넣을 곳: ${0}"
+    "Edit this group": "이 그룹 편집"
 }

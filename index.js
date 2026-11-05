@@ -2107,204 +2107,11 @@ function createGroup(parentId = null) {
     return openGroupEditor({ addNew: true, newParent: parentId });
 }
 
+// 「이 그룹 편집」: 큰 그룹 편집기를 그 그룹(과 안의 그룹)만 보이게 줄여서 — 생김새 · 다루는 법이 같음
 function startEditing(g) {
-    return openGroupQuick(g);
+    return openGroupEditor({ focusId: g.id, scopeId: g.id });
 }
 
-/**
- * 그룹 하나만 손보는 작은 창: 이름 · 색 · 택1, 이 그룹 토글(순서 바꾸기 · 빼기), 다른 토글 넣기, 하위 그룹으로 넘어가기.
- * 여러 그룹을 한꺼번에 짜는 건 도구 줄의 큰 편집기(openGroupEditor). 저장해야 반영, 저장 뒤 알림에서 되돌리기.
- */
-async function openGroupQuick(g0) {
-    const pm = promptManager;
-    if (!pm?.activeCharacter) return;
-    const data = presetData();
-    let draft = structuredClone(data.groups);
-    const g = draft.find(x => x.id === g0.id);
-    if (!g) return;
-    const wasExclusive = !!g.exclusive;
-    const order = (pm.getPromptOrderForCharacter(pm.activeCharacter) || []).filter(x => pm.getPromptById(x.identifier));
-    const at = new Map(order.map((x, i) => [x.identifier, i]));
-    const nameOf = id => String(pm.getPromptById(id)?.name ?? id);
-    const groupOf = id => draft.find(x => x.members.includes(id)) || null;
-    const byPos = (a, b) => (at.get(a) ?? 1e9) - (at.get(b) ?? 1e9);
-    draft.forEach(x => { x.members = x.members.filter(id => at.has(id)); });
-    const reordered = new Set();   // 끌어서 순서를 바꾼 그룹 — 실제 프롬프트 순서도 그 차례로
-    let target = g.id;   // 「토글 넣기」로 넣을 곳 (이 그룹 또는 펼쳐 고른 하위 그룹)
-    const opened = new Set();   // 펼친 하위 그룹
-    const e = escapeHtml;
-    const tree = () => makeTree(draft);
-
-    const root = document.createElement('div');
-    // 큰 그룹 편집기와 같은 부품(제목 · 그룹 줄 · 목록 상자 · 줄 · 검색칸 · 칩)으로 — 따로 노는 모양이 아니게
-    root.className = 'pf-editor pf-qe';
-    root.innerHTML = `
-        <h3 class="pf-ed-title">${e(tr`Edit this group`)}</h3>
-        <div class="pf-be-g pf-be-sel pf-qe-head">
-            <button type="button" class="pf-be-dot pf-qe-dot" title="${e(tr`Change color`)}" aria-label="${e(tr`Change color`)}"></button>
-            <input type="text" class="text_pole pf-be-name pf-qe-name" aria-label="${e(tr`Group name`)}" placeholder="${e(tr`Group name`)}">
-            <button type="button" class="pf-be-ic pf-qe-one" aria-pressed="false" title="${e(tr`Only one on`)}">${e(tr`Pick 1`)}</button>
-        </div>
-        <div class="pf-qe-swatches" hidden></div>
-        <div class="pf-qe-panes">
-            <section class="pf-qe-pane">
-                <div class="pf-be-head"><b>${e(tr`Toggles in this group`)} <span class="pf-be-n pf-qe-count"></span></b></div>
-                <ul class="pf-ed-list pf-be-reorder pf-qe-list"></ul>
-            </section>
-            <section class="pf-qe-pane">
-                <div class="pf-be-head"><b>${e(tr`Add a toggle`)}</b><span class="pf-qe-target"></span></div>
-                <div class="pf-ed-bar"><label class="pf-search pf-qe-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="${e(tr`Search toggles`)}" aria-label="${e(tr`Search toggles`)}"></label></div>
-                <ul class="pf-ed-list pf-qe-found"></ul>
-            </section>
-        </div>`;
-    const $ = sel => root.querySelector(sel);
-    const name = $('.pf-qe-name'), list = $('.pf-qe-list'), found = $('.pf-qe-found'), search = $('.pf-qe-search input');
-    name.value = g.name || '';
-    name.addEventListener('input', () => { g.name = name.value; });
-
-    const paintHead = () => {
-        $('.pf-qe-head').style.setProperty('--pf-color', groupColor(g, tree().indexOf(g), tree()));
-        const one = $('.pf-qe-one');
-        one.classList.toggle('on', !!g.exclusive);
-        one.setAttribute('aria-pressed', String(!!g.exclusive));
-    };
-    $('.pf-qe-one').addEventListener('click', () => { g.exclusive = !g.exclusive || undefined; if (!g.exclusive) delete g.exclusive; paintHead(); });
-    // 색: 창 안에서 바로 고름 (메뉴는 창 뒤에 깔려서)
-    const sw = $('.pf-qe-swatches');
-    sw.innerHTML = COLORS.map(c => `<button type="button" class="pf-swatch" style="--sw:${c}" data-c="${c}" aria-label="${c}"></button>`).join('')
-        + `<button type="button" class="pf-qe-auto">${e(tr`Automatic (from the emoji)`)}</button>`;
-    $('.pf-qe-dot').addEventListener('click', () => { sw.hidden = !sw.hidden; });
-    sw.addEventListener('click', ev => {
-        const b = ev.target.closest('button'); if (!b) return;
-        if (b.dataset.c) g.color = b.dataset.c; else delete g.color;
-        sw.hidden = true; paintHead();
-    });
-
-    // 이 그룹 토글 + 하위 그룹(접히는 줄, 펼치면 그 안 토글) — 다른 창으로 넘어가지 않고 여기서 다 다룸
-    const rowHtml = (id, gid, depth) => `<li class="pf-ed-row pf-ed-direct pf-qe-row" data-id="${e(id)}" data-g="${e(gid)}" style="--pf-depth:${depth}">
-            <span class="pf-ed-grip pf-qe-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span>
-            <span class="pf-ed-pos">#${(at.get(id) ?? 0) + 1}</span>
-            <span class="pf-ed-name-text">${e(nameOf(id))}</span>
-            <button type="button" class="pf-be-ic pf-qe-x" title="${e(tr`Remove from group`)}" aria-label="${e(tr`Remove from group`)}"><i class="fa-solid fa-xmark"></i></button>
-        </li>`;
-    const byId = id => draft.find(x => x.id === id);
-    function branch(k, depth) {
-        const t = tree(), open = opened.has(k.id);
-        let html = `<li class="pf-qe-kidrow${target === k.id ? ' pf-qe-target-on' : ''}" data-kid="${e(k.id)}" style="--pf-color:${groupColor(k, t.indexOf(k), t)};--pf-depth:${depth}" role="button" tabindex="0" aria-expanded="${open}">
-            <span class="pf-caret fa-solid ${open ? 'fa-chevron-down' : 'fa-chevron-right'}"></span><span class="pf-be-dot"></span><span class="pf-qe-kidname">${e(k.name || tr`(no name)`)}</span><span class="pf-be-n">${t.allItems(k).length}</span></li>`;
-        if (open) {
-            html += k.members.map(id => rowHtml(id, k.id, depth + 1)).join('');
-            t.childrenOf(k).forEach(c => { html += branch(c, depth + 1); });
-            if (!k.members.length && !t.childrenOf(k).length) html += `<li class="pf-be-empty" style="--pf-depth:${depth + 1}">${e(tr`No toggles yet. Add some below.`)}</li>`;
-        }
-        return html;
-    }
-    function renderList() {
-        const t = tree(), kids = t.childrenOf(g);
-        list.innerHTML = g.members.map(id => rowHtml(id, g.id, 0)).join('') + kids.map(k => branch(k, 0)).join('')
-            || `<li class="pf-be-empty">${e(tr`No toggles yet. Add some below.`)}</li>`;
-        $('.pf-qe-count').textContent = String(t.allItems(g).length);
-        $('.pf-qe-head').classList.toggle('pf-qe-target-on', target === g.id && kids.length > 0);
-        const tg = byId(target) || g;
-        $('.pf-qe-target').textContent = tr`Into: ${tg.name || tr`(no name)`}`;
-    }
-    // 위 그룹 줄을 누르면 넣을 곳 = 이 그룹
-    $('.pf-qe-head').addEventListener('click', ev => { if (ev.target.closest('input, button')) return; if (target !== g.id) { target = g.id; renderList(); refind(); } });
-    list.addEventListener('click', ev => {
-        const x = ev.target.closest('.pf-qe-x');
-        if (x) {
-            const li = x.closest('[data-id]'), k = byId(li.dataset.g);
-            if (k) k.members = k.members.filter(m => m !== li.dataset.id);
-            renderList(); refind();
-            return;
-        }
-        // 하위 그룹 줄: 펼치고 접기 + 넣을 곳으로
-        const kr = ev.target.closest('.pf-qe-kidrow'); if (!kr) return;
-        const id = kr.dataset.kid;
-        if (target === id && opened.has(id)) { opened.delete(id); target = g.id; } else { opened.add(id); target = id; }
-        renderList(); refind();
-    });
-    // 손잡이로 끌어 순서 바꾸기 (마우스 · 터치) — 같은 그룹 안에서만
-    let grab = null;
-    list.addEventListener('pointerdown', ev => {
-        const grip = ev.target.closest('.pf-qe-grip'); if (!grip) return;
-        ev.preventDefault();
-        grip.setPointerCapture?.(ev.pointerId);
-        grab = grip.closest('.pf-qe-row');
-        grab.classList.add('pf-qe-grab');
-    });
-    list.addEventListener('pointermove', ev => {
-        if (!grab) return;
-        const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.pf-qe-row');
-        if (!over || over === grab || !list.contains(over) || over.dataset.g !== grab.dataset.g) return;
-        const r = over.getBoundingClientRect();
-        over[ev.clientY < r.top + r.height / 2 ? 'before' : 'after'](grab);
-    });
-    const drop = () => {
-        if (!grab) return;
-        const gid = grab.dataset.g, k = byId(gid);
-        grab.classList.remove('pf-qe-grab'); grab = null;
-        const next = [...list.querySelectorAll('.pf-qe-row')].filter(li => li.dataset.g === gid).map(li => li.dataset.id);
-        if (k && next.join() !== k.members.join()) { k.members = next; reordered.add(gid); }
-    };
-    list.addEventListener('pointerup', drop);
-    list.addEventListener('pointercancel', drop);
-
-    // 토글 넣기: 넣을 곳에 없는 토글 전부(그룹 없는 것 먼저), 다른 그룹 것은 그 그룹 이름을 옅게
-    function refind() {
-        const q = search.value.trim().toLowerCase();
-        const mine = new Set((byId(target) || g).members);
-        const hits = order.map(x => x.identifier).filter(id => !mine.has(id) && (!q || nameOf(id).toLowerCase().includes(q)))
-            .sort((a, b) => (groupOf(a) ? 1 : 0) - (groupOf(b) ? 1 : 0) || byPos(a, b));
-        found.innerHTML = hits.map(id => { const o = groupOf(id); return `<li class="pf-ed-row pf-qe-hit" data-id="${e(id)}" role="button" tabindex="0"><i class="fa-solid fa-plus pf-qe-plus"></i><span class="pf-ed-pos">#${(at.get(id) ?? 0) + 1}</span><span class="pf-ed-name-text">${e(nameOf(id))}</span>${o ? `<span class="pf-ed-tag" style="--pf-color:${groupColor(o, tree().indexOf(o), tree())}">${e(o.name || tr`(no name)`)}</span>` : ''}</li>`; }).join('')
-            || `<li class="pf-be-empty">${e(tr`Nothing found.`)}</li>`;
-    }
-    search.addEventListener('input', refind);
-    found.addEventListener('click', ev => {
-        const li = ev.target.closest('.pf-qe-hit'); if (!li) return;
-        const id = li.dataset.id;
-        const k = byId(target) || g;
-        draft.forEach(x => { x.members = x.members.filter(m => m !== id); });
-        k.members = reordered.has(k.id) ? [...k.members, id] : [...k.members, id].sort(byPos);
-        renderList(); refind();
-    });
-
-    paintHead(); renderList(); refind();
-    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Save`, cancelButton: tr`Cancel`, wide: true, allowVerticalScrolling: true });
-    if (!ok) return;
-
-    // 비면(토글도 하위 그룹도 없음) 그룹은 풀고, 이름이 비면 안 토글 이름으로
-    const t = tree();
-    if (!t.allItems(g).length) draft = ungroupFrom(draft, g);
-    else if (!String(g.name || '').trim()) g.name = nameOf(t.allItems(g)[0]);
-    if (JSON.stringify(draft) === JSON.stringify(data.groups) && !reordered.size) return;
-    const snap = takeSnap();
-    // 끌어서 바꾼 순서는 실제 프롬프트 순서에도: 이 그룹 토글이 있던 자리는 그대로 두고 그 안에서만 차례를 바꿈
-    if (reordered.size && !isCustomLayout()) {
-        const cur = pm.getPromptOrderForCharacter(pm.activeCharacter).slice();
-        for (const gid of reordered) {
-            const k = byId(gid); if (!k) continue;
-            const want = k.members.filter(id => cur.some(x => x.identifier === id));
-            const slots = cur.map((x, i) => (want.includes(x.identifier) ? i : -1)).filter(i => i >= 0);
-            const entries = want.map(id => cur.find(x => x.identifier === id));
-            slots.forEach((slot, n) => { cur[slot] = entries[n]; });
-        }
-        pm.removePromptOrderForCharacter(pm.activeCharacter);
-        pm.addPromptOrderForCharacter(pm.activeCharacter, cur);
-        pm.saveServiceSettings();
-        pm.render();
-    }
-    data.groups = draft;
-    save();
-    // 택1 을 새로 켰으면 이미 여러 개 켜져 있을 때 실제 순서 첫 번째만 남김
-    if (g.exclusive && !wasExclusive && draft.includes(g)) {
-        const items = new Set(makeTree(draft).allItems(g));
-        const first = pm.getPromptOrderForCharacter(pm.activeCharacter).find(x => x.enabled && items.has(x.identifier));
-        if (first) enforceExclusive(new Set(), first.identifier);
-    }
-    apply();
-    offerRestore(snap, draft.includes(g) ? tr`Saved "${g.name}".` : tr`"${g0.name || tr`(no name)`}" was empty, so it was ungrouped.`);
-}
 
 /** 이름 앞의 이모지 · 기호(국기 · 변형 선택자 · ZWJ 포함)와 그 뒤 공백을 뗌 — 다 떼면 비는 이름은 그대로 */
 function plainName(name) {
@@ -2373,7 +2180,7 @@ function fitEditorHeight(root) {
     }
 }
 
-async function openGroupEditor({ focusId = null, addNew = false, newParent = null, auto = false, sources = null } = {}) {
+async function openGroupEditor({ focusId = null, addNew = false, newParent = null, auto = false, sources = null, scopeId = null } = {}) {
     const pm = promptManager;
     if (!pm?.activeCharacter) return;
     const data = presetData();
@@ -2417,9 +2224,9 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     const custom = new Set();   // 안에서 순서를 직접 바꾼 그룹 id
 
     const root = document.createElement('div');
-    root.className = 'pf-editor pf-be';
+    root.className = 'pf-editor pf-be' + (scopeId ? ' pf-be-scope' : '');
     root.innerHTML = `
-        <h3 class="pf-ed-title">${e(imp ? tr`Bring groups from another preset` : auto ? tr`Auto-group` : tr`Edit groups`)}</h3>
+        <h3 class="pf-ed-title">${e(imp ? tr`Bring groups from another preset` : auto ? tr`Auto-group` : scopeId ? tr`Edit this group` : tr`Edit groups`)}</h3>
         <div class="pf-ed-summary"></div>
         ${imp ? `${imp.length > 1 ? `<select class="text_pole pf-imp-from" aria-label="${e(tr`Bring from`)}">${impOptions()}</select>` : ''}
         <div class="pf-imp-stats"></div>` : ''}
@@ -2499,7 +2306,8 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
 
     function renderTree() {
         const t = tree();
-        const tops = draft.filter(g => !t.parentOf(g)).sort(bySpot);
+        const scopeRoot = scopeId ? draft.find(x => x.id === scopeId) : null;
+        const tops = scopeRoot ? [scopeRoot] : draft.filter(g => !t.parentOf(g)).sort(bySpot);
         // 직접 편집은 단계 제한 없음 — 깊이만큼 들여 씀
         const row = (g, depth) => {
             const n = t.allItems(g).length, top = !depth;
@@ -2508,7 +2316,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
                 <span class="pf-be-dot"></span>
                 <input type="text" class="text_pole pf-be-name" value="${e(g.name)}" placeholder="${e(tr`Group name`)}" aria-label="${e(tr`Group name`)}">
                 <span class="pf-be-n">${auto && mode === 'free' ? (isOld(g) ? (() => { const k = g.members.filter(id => origOf.get(id) !== g.id).length; return k ? `<span class="pf-new-badge" title="${e(tr`Toggles added to this group this time`)}">+${k}</span>` : ''; })() : `<span class="pf-new-badge pf-new-word" title="${e(tr`A group made this time`)}">${e(tr`New`)}</span>`) : ''}${n}</span>
-                <span class="pf-be-mv"><button type="button" class="pf-be-ic" data-act="up" title="${e(tr`Move group up`)}" aria-label="${e(tr`Move group up`)}"><i class="fa-solid fa-chevron-up"></i></button><button type="button" class="pf-be-ic" data-act="down" title="${e(tr`Move group down`)}" aria-label="${e(tr`Move group down`)}"><i class="fa-solid fa-chevron-down"></i></button></span>
+                ${scopeRoot && g === scopeRoot ? '<span class="pf-be-mv"></span>' : `<span class="pf-be-mv"><button type="button" class="pf-be-ic" data-act="up" title="${e(tr`Move group up`)}" aria-label="${e(tr`Move group up`)}"><i class="fa-solid fa-chevron-up"></i></button><button type="button" class="pf-be-ic" data-act="down" title="${e(tr`Move group down`)}" aria-label="${e(tr`Move group down`)}"><i class="fa-solid fa-chevron-down"></i></button></span>`}
                 <button type="button" class="pf-be-ic" data-act="sub" title="${e(tr`New group inside`)}" aria-label="${e(tr`New group inside`)}"><i class="fa-solid fa-folder-plus"></i></button>
                 <button type="button" class="pf-be-ic${g.exclusive ? ' on' : ''}" data-act="excl" title="${e(tr`Only one on`)}" aria-pressed="${!!g.exclusive}" aria-label="${e(tr`Only one on`)}">${e(tr`Pick 1`)}</button>
                 <button type="button" class="pf-be-ic" data-act="del" title="${e(tr`Ungroup`)}" aria-label="${e(tr`Ungroup`)}"><i class="fa-solid fa-xmark"></i></button>
@@ -2586,7 +2394,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
             if (filter === 'mine') refilter();
         }
     });
-    root.querySelector('.pf-be-add').addEventListener('click', () => { const g = addGroup(null); if (selected.size) putInto(g); renderTree(); refilter(); focusName(g.id); });
+    root.querySelector('.pf-be-add').addEventListener('click', () => { const g = addGroup(scopeId && draft.some(x => x.id === scopeId) ? scopeId : null); if (selected.size) putInto(g); renderTree(); refilter(); focusName(g.id); });
 
     // 토글 목록 — 고르기는 예전 편집 창과 같음 (누르기 · Shift 범위 · 끌어 칠하기 · 폰은 길게 누른 뒤 끌기)
     for (const it of order) {
@@ -2704,7 +2512,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
 
     const search = root.querySelector('.pf-search input');
     // 「이 그룹 편집」은 그 그룹 토글만 보이게 시작 (다른 토글을 넣으려면 「전체」)
-    let filter = focusId && !addNew ? 'mine' : 'all';
+    let filter = scopeId ? 'mine' : 'all';
     function refilter() {
         const q = search.value.trim().toLowerCase();
         const g = draft.find(x => x.id === sel), mine = new Set(g ? tree().allItems(g) : []);
@@ -2782,7 +2590,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     const fit = () => fitEditorHeight(root);
     setTimeout(fit, 0); setTimeout(fit, 250);
     window.addEventListener('resize', fit);
-    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: imp ? tr`Bring groups` : auto ? tr`Create` : tr`Save`, cancelButton: tr`Cancel`, wide: true, large: true, allowVerticalScrolling: true });
+    const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: imp ? tr`Bring groups` : auto ? tr`Create` : tr`Save`, cancelButton: tr`Cancel`, wide: true, large: !scopeId, allowVerticalScrolling: true });
     window.removeEventListener('resize', fit);
     document.removeEventListener('pointerup', stopPaint);
     if (!ok) return;

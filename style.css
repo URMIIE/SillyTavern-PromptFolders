@@ -587,31 +587,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-auto-ai .menu_button.pf-auto-ai-run:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 24%, transparent); border-color: var(--SmartThemeQuoteColor); }
 .pf-auto-ai .menu_button.pf-auto-ai-run:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 2px; }
 .pf-auto-ai .menu_button.pf-auto-ai-run.pf-busy { opacity: .85; }
-/* 「이 그룹 편집」 작은 창 — 큰 편집기 부품을 그대로 쓰고, 높이는 고정(검색 결과로 창이 들쑥날쑥하지 않게): 위 정보 · 아래 두 목록이 남는 높이를 나눠 가짐 */
-.pf-editor.pf-qe { width: 100%; max-width: 860px; margin: 0 auto; height: min(74vh, 640px); min-height: 0; gap: 8px; }
-.pf-qe > * { flex: none; margin: 0 !important; }
-.pf-qe .pf-qe-head { grid-template-columns: 12px minmax(0, 1fr) auto; cursor: default; padding: 6px 8px; }
-.pf-qe .pf-qe-dot { all: unset; width: 11px; height: 11px; border-radius: 50%; background: var(--pf-color); cursor: pointer; }
-.pf-qe .pf-qe-name.text_pole { font-weight: 600; }
-/* 가로: 왼쪽 이 그룹 토글 | 오른쪽 토글 넣기 (좁은 화면은 위아래로) */
-.pf-qe .pf-qe-panes { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
-.pf-qe .pf-qe-pane { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
-.pf-qe .pf-qe-list, .pf-qe .pf-qe-found { flex: 1 1 auto; min-height: 72px; max-height: none; }
-@media (max-width: 700px) { .pf-qe .pf-qe-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); } }
-.pf-qe .pf-qe-row, .pf-qe .pf-qe-hit { cursor: default; }
-.pf-qe .pf-qe-hit { cursor: pointer; }
-.pf-qe .pf-qe-plus { flex: none; width: 22px; text-align: center; font-size: .8em; color: var(--pf-muted); }
-.pf-qe .pf-qe-x { flex: none; }
-.pf-qe .pf-ed-tag { max-width: 40%; }
-.pf-qe-swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.pf-qe-swatches[hidden] { display: none !important; }
-.pf-qe-auto { all: unset; font-size: .8em; cursor: pointer; text-decoration: underline; color: var(--pf-muted); }
-/* 「이 그룹 편집」 안의 하위 그룹: 접히는 줄(누르면 펼치고 넣을 곳이 됨), 안 토글은 들여 씀 */
-.pf-qe .pf-qe-row, .pf-qe .pf-qe-list .pf-be-empty { padding-left: calc(10px + var(--pf-depth, 0) * 16px); }
-.pf-qe .pf-qe-kidrow { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 10px 4px calc(10px + var(--pf-depth, 0) * 16px); border-bottom: 1px solid var(--pf-line); cursor: pointer; font-weight: 600; }
-.pf-qe .pf-qe-kidrow:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent); }
-.pf-qe .pf-qe-kidrow .pf-caret { flex: none; width: 12px; font-size: .75em; color: var(--pf-muted); }
-.pf-qe .pf-qe-kidname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pf-qe .pf-qe-target-on.pf-qe-kidrow { background: color-mix(in srgb, var(--pf-color, var(--SmartThemeQuoteColor)) 12%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pf-color, var(--SmartThemeQuoteColor)) 70%, transparent); }
-.pf-qe .pf-qe-head { cursor: pointer; }
-.pf-qe .pf-be-head .pf-qe-target { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82em; color: var(--pf-muted); }
+/* 「이 그룹 편집」 = 큰 편집기를 그 그룹만 보이게 줄인 것 — 높이만 조금 작게 */
+.pf-be.pf-be-scope { height: min(70vh, 640px); }
+/* 창 안쪽 칸이 넘친 부분을 잘라서, 기울인 제목 글꼴의 키 큰 한글 윗부분이 잘리던 것 */
+.pf-editor .pf-ed-title { padding-top: .2em; line-height: 1.35; }
