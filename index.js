@@ -1532,7 +1532,7 @@ function fitIntoGroups(order, groups, plan, nameOf, dividers = new Set(), W = {}
 
 // AI 로 묶기: 토글 이름 · 내용 앞부분을 지금 연결된 API 로 한 번 보내 그룹 계획을 받음 (번호로 주고받아 이름이 바뀌어도 안전)
 const AI_GROUP_PROMPT = `You organise the prompt toggles of a SillyTavern preset into folders so a user can find them quickly.
-Input: one line per toggle — index | on/off | name. Only names are given, not the prompt text. Names may be decorated with symbols; markers like ⤵/⤴, start/end, <tag>/</tag> or blank names often open and close sections.
+Input: one line per toggle — index | name. Only names are given, not the prompt text. Names may be decorated with symbols; markers like ⤵/⤴, start/end, <tag>/</tag> or blank names often open and close sections.
 Return ONLY JSON: {"groups":[{"name":"","items":[0,1],"children":[{"name":"","items":[2,3]}]}]}
 - Follow the preset's own sections when it has them; otherwise group by purpose (language, POV, style, pacing, NSFW, trackers, reasoning, jailbreak/system, etc.).
 - Put "pick one" alternatives together. Keep a section's opening and closing marker in that section's group.
@@ -1666,7 +1666,7 @@ async function confirmAiSend(count, groupCount = 0) {
     root.innerHTML = `
         <h3>${e(tr`Before grouping with AI`)}</h3>
         <ul>
-            <li><b>${e(tr`Sent`)}</b> — ${e(tr`the names of ${count} toggles, with their order and on/off state.`)}${groupCount ? ` ${e(tr`Also the names of your ${groupCount} groups, each with up to 3 of its toggle names, so toggles can go into them.`)}` : ''}</li>
+            <li><b>${e(tr`Sent`)}</b> — ${e(tr`the names of ${count} toggles and their order.`)}${groupCount ? ` ${e(tr`Also the names of your ${groupCount} groups, each with up to 3 of its toggle names, so toggles can go into them.`)}` : ''}</li>
             <li><b>${e(tr`Not sent`)}</b> — ${e(tr`the prompt text inside the toggles, your chat, or anything else.`)}</li>
             <li><b>${e(tr`Sent to`)}</b> — ${e(aiTargetLabel())}. ${e(tr`Nothing goes to the extension author or any other server.`)}</li>
         </ul>
@@ -1763,9 +1763,8 @@ function bindAiPickers(root) {
 async function aiPlan(order, getPrompt, signal, existing = null) {
     const ids = order.map(x => x.identifier).filter(id => getPrompt(id));
     const lines = ids.map((id, i) => {
-        const p = getPrompt(id), on = order.find(x => x.identifier === id)?.enabled;
-        // 프롬프트 내용은 보내지 않음 (제작자 글 보호) — 이름만
-        return `${i} | ${on ? 'on' : 'off'} | ${String(p.name || '').trim() || '(no name)'}`;
+        // 프롬프트 내용 · 켜짐/꺼짐은 보내지 않음 (제작자 글 보호, 묶는 데 필요 없음) — 이름만
+        return `${i} | ${String(getPrompt(id).name || '').trim() || '(no name)'}`;
     });
     // 기존 그룹: 토글이 바로 들어 있는 그룹만 (안에 그룹만 있는 큰 그룹은 넣을 곳이 아님)
     const known = (existing || []).filter(g => g.members?.length);

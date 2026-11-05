@@ -108,7 +108,6 @@
     "Connection profile \"${0}\"": "연결 프로필 「${0}」",
     "Before grouping with AI": "AI로 묶기 전에",
     "Sent": "보내는 것",
-    "the names of ${0} toggles, with their order and on/off state.": "토글 ${0}개의 이름과 순서, 켜짐/꺼짐.",
     "Not sent": "보내지 않는 것",
     "the prompt text inside the toggles, your chat, or anything else.": "토글 안의 프롬프트 내용, 채팅 내용, 그 밖의 모든 것.",
     "Sent to": "보내는 곳",
@@ -193,5 +192,6 @@
     "${0} toggles went into existing groups · ${1} new groups.": "기존 그룹에 토글 ${0}개 · 새 그룹 ${1}개",
     "${0} leftover toggles go into existing groups and ${1} new groups are made. Changes are marked New — pick \"Changed this time\" to see only them. Fix anything, then create.": "남은 토글 ${0}개는 기존 그룹에 넣고, 새 그룹은 ${1}개 만들어요. 바뀌는 것엔 「new」가 붙어 있고, 「이번에 바뀐 것」을 누르면 그것만 보여요. 고칠 게 있으면 고친 뒤 만들기를 누르세요.",
     "Also the names of your ${0} groups, each with up to 3 of its toggle names, so toggles can go into them.": "지금 그룹 ${0}개의 이름과 그룹마다 토글 이름 3개까지도 보내요(기존 그룹에 넣을 수 있게).",
-    "A group made this time": "이번에 새로 만드는 그룹"
+    "A group made this time": "이번에 새로 만드는 그룹",
+    "the names of ${0} toggles and their order.": "토글 ${0}개의 이름과 순서."
 }
