@@ -274,7 +274,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-ai-now { opacity: .7; }
 
 .pf-ai-notice { text-align: left; }
-.pf-ai-notice h3 { margin: 0 0 8px; }
+.pf-ai-notice h3 { margin: 0 0 8px; padding-top: .2em; line-height: 1.35; }   /* 창 안쪽 칸이 넘친 부분을 잘라서, 기울인 제목 글꼴의 키 큰 한글(묶 등) 윗부분이 잘리던 것 */
 .pf-ai-notice ul { margin: 0 0 12px; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
 
 .pf-ai-fields label[hidden] { display: none !important; }
