@@ -588,6 +588,6 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-auto-ai .menu_button.pf-auto-ai-run:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 2px; }
 .pf-auto-ai .menu_button.pf-auto-ai-run.pf-busy { opacity: .85; }
 /* 「이 그룹 편집」 = 큰 편집기를 그 그룹만 보이게 줄인 것 — 높이만 조금 작게 */
-.pf-be.pf-be-scope { height: min(70vh, 640px); }
+@media (min-width: 901px) { .pf-be.pf-be-scope { height: min(70vh, 640px); } }   /* 좁은 화면은 큰 편집기처럼 높이 자동(위아래로 쌓여서) */
 /* 창 안쪽 칸이 넘친 부분을 잘라서, 기울인 제목 글꼴의 키 큰 한글 윗부분이 잘리던 것 */
 .pf-editor .pf-ed-title { padding-top: .2em; line-height: 1.35; }
