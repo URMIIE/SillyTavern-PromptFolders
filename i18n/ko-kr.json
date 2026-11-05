@@ -197,9 +197,8 @@
     "Toggles in this group": "이 그룹 토글",
     "Add a toggle": "토글 넣기",
     "No toggles yet. Add some below.": "아직 토글이 없어요. 아래에서 넣어 주세요.",
-    "Groups inside": "안의 그룹",
     "Nothing found.": "찾은 게 없어요.",
     "Saved \"${0}\".": "「${0}」을(를) 저장했어요.",
     "\"${0}\" was empty, so it was ungrouped.": "「${0}」이(가) 비어서 그룹을 풀었어요.",
-    "Its toggles are in the groups inside. Add here to put a toggle in this group directly.": "토글은 안의 그룹에 들어 있어요. 여기서 넣으면 이 그룹에 바로 들어가요."
+    "Into: ${0}": "넣을 곳: ${0}"
 }

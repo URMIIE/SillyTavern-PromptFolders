@@ -604,7 +604,14 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-qe .pf-qe-x { flex: none; }
 .pf-qe .pf-ed-tag { max-width: 40%; }
 .pf-qe-swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.pf-qe-swatches[hidden], .pf-qe-kids[hidden] { display: none !important; }
+.pf-qe-swatches[hidden] { display: none !important; }
 .pf-qe-auto { all: unset; font-size: .8em; cursor: pointer; text-decoration: underline; color: var(--pf-muted); }
-.pf-qe-kids { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.pf-qe-kids-label { font-size: .85em; color: var(--pf-muted); }
+/* 「이 그룹 편집」 안의 하위 그룹: 접히는 줄(누르면 펼치고 넣을 곳이 됨), 안 토글은 들여 씀 */
+.pf-qe .pf-qe-row, .pf-qe .pf-qe-list .pf-be-empty { padding-left: calc(10px + var(--pf-depth, 0) * 16px); }
+.pf-qe .pf-qe-kidrow { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 10px 4px calc(10px + var(--pf-depth, 0) * 16px); border-bottom: 1px solid var(--pf-line); cursor: pointer; font-weight: 600; }
+.pf-qe .pf-qe-kidrow:hover { background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent); }
+.pf-qe .pf-qe-kidrow .pf-caret { flex: none; width: 12px; font-size: .75em; color: var(--pf-muted); }
+.pf-qe .pf-qe-kidname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-qe .pf-qe-target-on.pf-qe-kidrow { background: color-mix(in srgb, var(--pf-color, var(--SmartThemeQuoteColor)) 12%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pf-color, var(--SmartThemeQuoteColor)) 70%, transparent); }
+.pf-qe .pf-qe-head { cursor: pointer; }
+.pf-qe .pf-be-head .pf-qe-target { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82em; color: var(--pf-muted); }

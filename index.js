@@ -2128,8 +2128,10 @@ async function openGroupQuick(g0) {
     const nameOf = id => String(pm.getPromptById(id)?.name ?? id);
     const groupOf = id => draft.find(x => x.members.includes(id)) || null;
     const byPos = (a, b) => (at.get(a) ?? 1e9) - (at.get(b) ?? 1e9);
-    g.members = g.members.filter(id => at.has(id));
-    let reordered = false;   // 끌어서 순서를 바꿨으면 실제 프롬프트 순서도 그 차례로
+    draft.forEach(x => { x.members = x.members.filter(id => at.has(id)); });
+    const reordered = new Set();   // 끌어서 순서를 바꾼 그룹 — 실제 프롬프트 순서도 그 차례로
+    let target = g.id;   // 「토글 넣기」로 넣을 곳 (이 그룹 또는 펼쳐 고른 하위 그룹)
+    const opened = new Set();   // 펼친 하위 그룹
     const e = escapeHtml;
     const tree = () => makeTree(draft);
 
@@ -2144,14 +2146,13 @@ async function openGroupQuick(g0) {
             <button type="button" class="pf-be-ic pf-qe-one" aria-pressed="false" title="${e(tr`Only one on`)}">${e(tr`Pick 1`)}</button>
         </div>
         <div class="pf-qe-swatches" hidden></div>
-        <div class="pf-qe-kids" hidden></div>
         <div class="pf-qe-panes">
             <section class="pf-qe-pane">
                 <div class="pf-be-head"><b>${e(tr`Toggles in this group`)} <span class="pf-be-n pf-qe-count"></span></b></div>
                 <ul class="pf-ed-list pf-be-reorder pf-qe-list"></ul>
             </section>
             <section class="pf-qe-pane">
-                <div class="pf-be-head"><b>${e(tr`Add a toggle`)}</b></div>
+                <div class="pf-be-head"><b>${e(tr`Add a toggle`)}</b><span class="pf-qe-target"></span></div>
                 <div class="pf-ed-bar"><label class="pf-search pf-qe-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" placeholder="${e(tr`Search toggles`)}" aria-label="${e(tr`Search toggles`)}"></label></div>
                 <ul class="pf-ed-list pf-qe-found"></ul>
             </section>
@@ -2179,27 +2180,51 @@ async function openGroupQuick(g0) {
         sw.hidden = true; paintHead();
     });
 
-    // 이 그룹 토글 (바로 든 것만 — 하위 그룹 것은 아래 하위 그룹 줄로)
-    function renderList() {
-        list.innerHTML = g.members.map(id => `<li class="pf-ed-row pf-ed-direct pf-qe-row" data-id="${e(id)}">
+    // 이 그룹 토글 + 하위 그룹(접히는 줄, 펼치면 그 안 토글) — 다른 창으로 넘어가지 않고 여기서 다 다룸
+    const rowHtml = (id, gid, depth) => `<li class="pf-ed-row pf-ed-direct pf-qe-row" data-id="${e(id)}" data-g="${e(gid)}" style="--pf-depth:${depth}">
             <span class="pf-ed-grip pf-qe-grip" title="${e(tr`Drag to reorder`)}"><i class="fa-solid fa-grip-lines"></i></span>
             <span class="pf-ed-pos">#${(at.get(id) ?? 0) + 1}</span>
             <span class="pf-ed-name-text">${e(nameOf(id))}</span>
             <button type="button" class="pf-be-ic pf-qe-x" title="${e(tr`Remove from group`)}" aria-label="${e(tr`Remove from group`)}"><i class="fa-solid fa-xmark"></i></button>
-        </li>`).join('') || `<li class="pf-be-empty">${e(tree().childrenOf(g).length ? tr`Its toggles are in the groups inside. Add here to put a toggle in this group directly.` : tr`No toggles yet. Add some below.`)}</li>`;
-        $('.pf-qe-count').textContent = String(g.members.length);
-        const kids = tree().childrenOf(g);
-        const kb = $('.pf-qe-kids');
-        kb.hidden = !kids.length;
-        kb.innerHTML = kids.length ? `<span class="pf-qe-kids-label">${e(tr`Groups inside`)}</span>` + kids.map(k => `<button type="button" class="pf-ed-chip pf-qe-kid" data-g="${e(k.id)}">${e(k.name || tr`(no name)`)} <span class="pf-be-n">${tree().allItems(k).length}</span></button>`).join('') : '';
+        </li>`;
+    const byId = id => draft.find(x => x.id === id);
+    function branch(k, depth) {
+        const t = tree(), open = opened.has(k.id);
+        let html = `<li class="pf-qe-kidrow${target === k.id ? ' pf-qe-target-on' : ''}" data-kid="${e(k.id)}" style="--pf-color:${groupColor(k, t.indexOf(k), t)};--pf-depth:${depth}" role="button" tabindex="0" aria-expanded="${open}">
+            <span class="pf-caret fa-solid ${open ? 'fa-chevron-down' : 'fa-chevron-right'}"></span><span class="pf-be-dot"></span><span class="pf-qe-kidname">${e(k.name || tr`(no name)`)}</span><span class="pf-be-n">${t.allItems(k).length}</span></li>`;
+        if (open) {
+            html += k.members.map(id => rowHtml(id, k.id, depth + 1)).join('');
+            t.childrenOf(k).forEach(c => { html += branch(c, depth + 1); });
+            if (!k.members.length && !t.childrenOf(k).length) html += `<li class="pf-be-empty" style="--pf-depth:${depth + 1}">${e(tr`No toggles yet. Add some below.`)}</li>`;
+        }
+        return html;
     }
+    function renderList() {
+        const t = tree(), kids = t.childrenOf(g);
+        list.innerHTML = g.members.map(id => rowHtml(id, g.id, 0)).join('') + kids.map(k => branch(k, 0)).join('')
+            || `<li class="pf-be-empty">${e(tr`No toggles yet. Add some below.`)}</li>`;
+        $('.pf-qe-count').textContent = String(t.allItems(g).length);
+        $('.pf-qe-head').classList.toggle('pf-qe-target-on', target === g.id && kids.length > 0);
+        const tg = byId(target) || g;
+        $('.pf-qe-target').textContent = tr`Into: ${tg.name || tr`(no name)`}`;
+    }
+    // 위 그룹 줄을 누르면 넣을 곳 = 이 그룹
+    $('.pf-qe-head').addEventListener('click', ev => { if (ev.target.closest('input, button')) return; if (target !== g.id) { target = g.id; renderList(); refind(); } });
     list.addEventListener('click', ev => {
-        const x = ev.target.closest('.pf-qe-x'); if (!x) return;
-        const id = x.closest('[data-id]').dataset.id;
-        g.members = g.members.filter(m => m !== id);
+        const x = ev.target.closest('.pf-qe-x');
+        if (x) {
+            const li = x.closest('[data-id]'), k = byId(li.dataset.g);
+            if (k) k.members = k.members.filter(m => m !== li.dataset.id);
+            renderList(); refind();
+            return;
+        }
+        // 하위 그룹 줄: 펼치고 접기 + 넣을 곳으로
+        const kr = ev.target.closest('.pf-qe-kidrow'); if (!kr) return;
+        const id = kr.dataset.kid;
+        if (target === id && opened.has(id)) { opened.delete(id); target = g.id; } else { opened.add(id); target = id; }
         renderList(); refind();
     });
-    // 손잡이로 끌어 순서 바꾸기 (마우스 · 터치)
+    // 손잡이로 끌어 순서 바꾸기 (마우스 · 터치) — 같은 그룹 안에서만
     let grab = null;
     list.addEventListener('pointerdown', ev => {
         const grip = ev.target.closest('.pf-qe-grip'); if (!grip) return;
@@ -2211,25 +2236,26 @@ async function openGroupQuick(g0) {
     list.addEventListener('pointermove', ev => {
         if (!grab) return;
         const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.pf-qe-row');
-        if (!over || over === grab || !list.contains(over)) return;
+        if (!over || over === grab || !list.contains(over) || over.dataset.g !== grab.dataset.g) return;
         const r = over.getBoundingClientRect();
         over[ev.clientY < r.top + r.height / 2 ? 'before' : 'after'](grab);
     });
     const drop = () => {
         if (!grab) return;
+        const gid = grab.dataset.g, k = byId(gid);
         grab.classList.remove('pf-qe-grab'); grab = null;
-        const next = [...list.querySelectorAll('.pf-qe-row')].map(li => li.dataset.id);
-        if (next.join() !== g.members.join()) { g.members = next; reordered = true; }
+        const next = [...list.querySelectorAll('.pf-qe-row')].filter(li => li.dataset.g === gid).map(li => li.dataset.id);
+        if (k && next.join() !== k.members.join()) { k.members = next; reordered.add(gid); }
     };
     list.addEventListener('pointerup', drop);
     list.addEventListener('pointercancel', drop);
 
-    // 토글 넣기: 그룹에 안 든 것 먼저, 다른 그룹 것은 그 그룹 이름을 옅게
+    // 토글 넣기: 넣을 곳에 없는 토글 전부(그룹 없는 것 먼저), 다른 그룹 것은 그 그룹 이름을 옅게
     function refind() {
         const q = search.value.trim().toLowerCase();
-        const mine = new Set(g.members);
+        const mine = new Set((byId(target) || g).members);
         const hits = order.map(x => x.identifier).filter(id => !mine.has(id) && (!q || nameOf(id).toLowerCase().includes(q)))
-            .sort((a, b) => (groupOf(a) ? 1 : 0) - (groupOf(b) ? 1 : 0) || byPos(a, b)).slice(0, 40);
+            .sort((a, b) => (groupOf(a) ? 1 : 0) - (groupOf(b) ? 1 : 0) || byPos(a, b));
         found.innerHTML = hits.map(id => { const o = groupOf(id); return `<li class="pf-ed-row pf-qe-hit" data-id="${e(id)}" role="button" tabindex="0"><i class="fa-solid fa-plus pf-qe-plus"></i><span class="pf-ed-pos">#${(at.get(id) ?? 0) + 1}</span><span class="pf-ed-name-text">${e(nameOf(id))}</span>${o ? `<span class="pf-ed-tag" style="--pf-color:${groupColor(o, tree().indexOf(o), tree())}">${e(o.name || tr`(no name)`)}</span>` : ''}</li>`; }).join('')
             || `<li class="pf-be-empty">${e(tr`Nothing found.`)}</li>`;
     }
@@ -2237,12 +2263,11 @@ async function openGroupQuick(g0) {
     found.addEventListener('click', ev => {
         const li = ev.target.closest('.pf-qe-hit'); if (!li) return;
         const id = li.dataset.id;
+        const k = byId(target) || g;
         draft.forEach(x => { x.members = x.members.filter(m => m !== id); });
-        g.members = reordered ? [...g.members, id] : [...g.members, id].sort(byPos);
+        k.members = reordered.has(k.id) ? [...k.members, id] : [...k.members, id].sort(byPos);
         renderList(); refind();
     });
-    let goKid = null;
-    $('.pf-qe-kids').addEventListener('click', ev => { const b = ev.target.closest('.pf-qe-kid'); if (!b) return; goKid = b.dataset.g; root.closest('.popup')?.querySelector('.popup-button-ok')?.click(); });
 
     paintHead(); renderList(); refind();
     const ok = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', { okButton: tr`Save`, cancelButton: tr`Cancel`, wide: true, allowVerticalScrolling: true });
@@ -2252,18 +2277,18 @@ async function openGroupQuick(g0) {
     const t = tree();
     if (!t.allItems(g).length) draft = ungroupFrom(draft, g);
     else if (!String(g.name || '').trim()) g.name = nameOf(t.allItems(g)[0]);
-    if (JSON.stringify(draft) === JSON.stringify(data.groups) && !reordered) {
-        if (goKid) { const k = data.groups.find(x => x.id === goKid); if (k) openGroupQuick(k); }
-        return;
-    }
+    if (JSON.stringify(draft) === JSON.stringify(data.groups) && !reordered.size) return;
     const snap = takeSnap();
     // 끌어서 바꾼 순서는 실제 프롬프트 순서에도: 이 그룹 토글이 있던 자리는 그대로 두고 그 안에서만 차례를 바꿈
-    if (reordered && !isCustomLayout()) {
+    if (reordered.size && !isCustomLayout()) {
         const cur = pm.getPromptOrderForCharacter(pm.activeCharacter).slice();
-        const want = g.members.filter(id => cur.some(x => x.identifier === id));
-        const slots = cur.map((x, i) => (want.includes(x.identifier) ? i : -1)).filter(i => i >= 0);
-        const entries = want.map(id => cur.find(x => x.identifier === id));
-        slots.forEach((slot, k) => { cur[slot] = entries[k]; });
+        for (const gid of reordered) {
+            const k = byId(gid); if (!k) continue;
+            const want = k.members.filter(id => cur.some(x => x.identifier === id));
+            const slots = cur.map((x, i) => (want.includes(x.identifier) ? i : -1)).filter(i => i >= 0);
+            const entries = want.map(id => cur.find(x => x.identifier === id));
+            slots.forEach((slot, n) => { cur[slot] = entries[n]; });
+        }
         pm.removePromptOrderForCharacter(pm.activeCharacter);
         pm.addPromptOrderForCharacter(pm.activeCharacter, cur);
         pm.saveServiceSettings();
@@ -2279,7 +2304,6 @@ async function openGroupQuick(g0) {
     }
     apply();
     offerRestore(snap, draft.includes(g) ? tr`Saved "${g.name}".` : tr`"${g0.name || tr`(no name)`}" was empty, so it was ungrouped.`);
-    if (goKid) { const k = data.groups.find(x => x.id === goKid); if (k) openGroupQuick(k); }
 }
 
 /** 이름 앞의 이모지 · 기호(국기 · 변형 선택자 · ZWJ 포함)와 그 뒤 공백을 뗌 — 다 떼면 비는 이름은 그대로 */
