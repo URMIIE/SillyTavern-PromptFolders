@@ -709,12 +709,13 @@ function renderToolbar(list, groups) {
         const view = settings().view;
         const anyOpen = presetData().groups.some(g => !g.collapsed);
         bar.innerHTML = `
-            ${ib('pf-new', 'fa-folder-plus', tr`New group`)}
+            ${ib('pf-edit', groups.length ? 'fa-pen-to-square' : 'fa-folder-plus', groups.length ? tr`Edit groups` : tr`New group`)}
             ${groups.length ? '' : ib('pf-auto', 'fa-wand-magic-sparkles', tr`Auto-group`)}
             ${groups.length ? ib('pf-view', 'fa-list-ol', view === 'original' ? tr`Show with groups` : tr`Show without groups`, `aria-pressed="${view === 'original'}"`) : ''}
             ${groups.length ? ib('pf-fold' + (view === 'original' ? ' pf-ib-gone' : ''), anyOpen ? 'fa-angles-up' : 'fa-angles-down', anyOpen ? tr`Collapse all` : tr`Expand all`, view === 'original' ? 'aria-hidden="true" tabindex="-1"' : '') : ''}
             ${ib('pf-tools', 'fa-ellipsis', tr`Import / export groups`)}`;
-        bar.querySelector('.pf-new').addEventListener('click', () => createGroup(null));
+        // 전체 그룹 편집은 여기 한 곳 (새 그룹은 편집기 안 「+ 그룹 만들기」로) — 그룹이 하나도 없으면 빈 새 그룹을 만들어 둔 채로
+        bar.querySelector('.pf-edit').addEventListener('click', () => (presetData().groups.length ? openGroupEditor({}) : createGroup(null)));
         bar.querySelector('.pf-auto')?.addEventListener('click', autoGroup);
         bar.querySelector('.pf-tools').addEventListener('click', ev => openToolsMenu(ev.currentTarget));
         bar.querySelector('.pf-view')?.addEventListener('click', () => {
@@ -1004,7 +1005,7 @@ function openGroupMenu(g, anchor, range) {
     info.className = 'pf-menu-info';
     info.textContent = tr`Real position ${range}`;
     menu.append(info);
-    item('fa-pen-to-square', escapeHtml(tr`Edit group`), () => startEditing(g));
+    item('fa-pen-to-square', escapeHtml(tr`Edit this group`), () => startEditing(g));
     item('fa-folder-plus', escapeHtml(tr`New group inside`), () => createGroup(g.id));
     item('fa-palette', escapeHtml(tr`Change color`), () => pickColor(g, anchor));
     item(g.exclusive ? 'fa-toggle-on' : 'fa-toggle-off', escapeHtml(tr`Only one on at a time`), () => setExclusive(g, !g.exclusive));
@@ -1051,7 +1052,6 @@ function openToolsMenu(anchor) {
     info.textContent = presetKey();
     menu.append(info);
     item('fa-wand-magic-sparkles', tr`Auto-group`, autoGroup);
-    item('fa-pen-to-square', tr`Edit all groups`, () => openGroupEditor({}));
     const sepL = document.createElement('div');
     sepL.className = 'pf-menu-sep';
     sepL.textContent = tr`Group placement`;
@@ -2498,7 +2498,8 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     root.querySelector('.pf-be-clear').addEventListener('click', () => { rows.forEach(li => setRow(li, false)); changed(); });
 
     const search = root.querySelector('.pf-search input');
-    let filter = 'all';
+    // 「이 그룹 편집」은 그 그룹 토글만 보이게 시작 (다른 토글을 넣으려면 「전체」)
+    let filter = focusId && !addNew ? 'mine' : 'all';
     function refilter() {
         const q = search.value.trim().toLowerCase();
         const g = draft.find(x => x.id === sel), mine = new Set(g ? tree().allItems(g) : []);

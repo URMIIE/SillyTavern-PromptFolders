@@ -150,7 +150,6 @@
     "Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.": "왼쪽에서 그룹을 고르고, 오른쪽에서 토글을 골라 넣으세요. ＋로 그룹 안에 그룹을 몇 단계든 만들 수 있어요.",
     "Grouped by AI. Fix names, move toggles, then create.": "AI가 묶었어요. 이름을 고치고 토글을 옮긴 뒤 만들기를 누르세요.",
     "Groups saved.": "그룹을 저장했어요.",
-    "Edit all groups": "그룹 한꺼번에 편집",
     "Bring ${0} groups from \"${1}\" into \"${2}\"? The current groups of this preset are replaced.": "「${1}」의 그룹 ${0}개를 「${2}」로 가져올까요? 지금 프리셋의 그룹은 바뀌어요.",
     "${0} toggles matched · ${1} matched by name · ${2} not in this preset · ${3} new toggles placed next to their neighbors · ${4} left outside groups": "그대로 맞음 ${0}개 · 이름으로 맞춤 ${1}개 · 이 프리셋에 없음 ${2}개 · 새 토글을 옆 그룹에 넣음 ${3}개 · 그룹 밖에 남음 ${4}개",
     "No other preset has groups yet.": "그룹이 있는 다른 프리셋이 아직 없어요.",
@@ -193,5 +192,6 @@
     "${0} leftover toggles go into existing groups and ${1} new groups are made. Changes are marked New — pick \"Changed this time\" to see only them. Fix anything, then create.": "남은 토글 ${0}개는 기존 그룹에 넣고, 새 그룹은 ${1}개 만들어요. 바뀌는 것엔 「new」가 붙어 있고, 「이번에 바뀐 것」을 누르면 그것만 보여요. 고칠 게 있으면 고친 뒤 만들기를 누르세요.",
     "Also the names of your ${0} groups, each with up to 3 of its toggle names, so toggles can go into them.": "지금 그룹 ${0}개의 이름과 그룹마다 토글 이름 3개까지도 보내요(기존 그룹에 넣을 수 있게).",
     "A group made this time": "이번에 새로 만드는 그룹",
-    "the names of ${0} toggles and their order.": "토글 ${0}개의 이름과 순서."
+    "the names of ${0} toggles and their order.": "토글 ${0}개의 이름과 순서.",
+    "Edit this group": "이 그룹 편집"
 }
