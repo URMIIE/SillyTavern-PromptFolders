@@ -115,6 +115,8 @@ body.pf-wrap-names #completion_prompt_manager #completion_prompt_manager_list .c
     flex: none;
     width: 2.15em;    /* 테마 글자 크기를 따라감 (예전 30px 고정) */
     height: 2.15em;
+    box-sizing: border-box;
+    padding: 0;
     border-radius: 6px;
     color: var(--pf-muted);
     cursor: pointer;
@@ -591,3 +593,53 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 @media (min-width: 901px) { .pf-be.pf-be-scope { height: min(70vh, 640px); } }   /* 좁은 화면은 큰 편집기처럼 높이 자동(위아래로 쌓여서) */
 /* 창 안쪽 칸이 넘친 부분을 잘라서, 기울인 제목 글꼴의 키 큰 한글 윗부분이 잘리던 것 */
 .pf-editor .pf-ed-title { padding-top: .2em; line-height: 1.35; }
+
+/* 도구 줄 자리: 제목 줄 안 · 목록 아래 */
+#completion_prompt_manager .completion_prompt_manager_header .pf-toolbar.pf-bar-head { flex: 0 1 auto; width: auto; margin: -4px 12px -4px auto; }
+#completion_prompt_manager .completion_prompt_manager_header .pf-toolbar.pf-bar-head { gap: 6px; font-size: var(--mainFontSize, 15px); }
+#completion_prompt_manager .completion_prompt_manager_header .pf-toolbar.pf-bar-head > .pf-ib { box-sizing: border-box; width: 30px; height: 30px; min-width: 30px; padding: 0; margin: 0; line-height: 1; }   /* 테마가 제목 줄 안 div 에 여백을 줘도 마우스 올린 칸이 정사각형으로 */
+#completion_prompt_manager .completion_prompt_manager_header:has(.pf-bar-head) { align-items: center; }
+.pf-toolbar.pf-bar-bottom { margin: 8px 0 2px; }
+.pf-be-trans { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 8px; }
+.pf-be-trans[hidden] { display: none; }
+.pf-be-trans .pf-be-trans-run { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: .85em;
+    color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent); border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 35%, transparent); }
+.pf-be-trans .pf-be-trans-run:hover { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 22%, transparent); }
+.pf-be-trans .pf-be-trans-run:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+.pf-be-trans .pf-be-trans-run.pf-busy { opacity: .6; pointer-events: none; }
+.pf-be-trans .pf-be-trans-how { display: inline-flex; gap: 4px; }
+.pf-be-trans .pf-be-trans-note { color: var(--pf-muted, inherit); opacity: .8; flex: 1 1 auto; }
+.pf-be-trans .pf-be-trans-conn { flex: 1 1 100%; }
+.pf-be-trans .pf-be-trans-conn[hidden] { display: none; }
+.pf-be-trans .pf-be-trans-eng { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 4px; }
+.pf-be-trans .pf-be-trans-eng[hidden] { display: none; }
+.pf-set-prompts { margin: 4px 0 8px; }
+.pf-set-prompts .pf-set-prompt { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.pf-set-prompts .pf-set-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pf-set-prompts textarea { width: 100%; box-sizing: border-box; resize: vertical; font-size: .85em; line-height: 1.45; }
+.pf-ps { display: flex; flex-direction: column; gap: 8px; }
+.pf-ps .pf-ps-pills { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.pf-ps .pf-ps-add { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border-radius: 999px; font-size: .85em; cursor: pointer; color: var(--SmartThemeBodyColor); border: 1px dashed color-mix(in srgb, var(--SmartThemeBodyColor) 30%, transparent); }
+.pf-ps .pf-ps-add:hover { border-style: solid; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, transparent); }
+.pf-ps .pf-ps-add:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+.pf-ps .pf-ps-namerow { display: flex; gap: 6px; align-items: center; }
+.pf-ps .pf-ps-namerow[hidden] { display: none; }
+.pf-ps .pf-ps-name { flex: 1 1 auto; margin: 0; }
+.pf-ps .pf-ps-default-note { display: none; }
+.pf-ps.pf-ps-default .pf-ps-default-note { display: block; }
+.pf-ps.pf-ps-default .pf-set-reset { display: none; }
+.pf-ps.pf-ps-default textarea { opacity: .7; }
+.pf-ps .pf-ed-chip { font-size: .85em; }
+.pf-settings { --pf-muted: color-mix(in srgb, var(--SmartThemeBodyColor) 58%, transparent); --pf-line: color-mix(in srgb, var(--SmartThemeBodyColor) 16%, transparent); }
+/* 지시문 칸 단추: 실리태번 기본 단추 대신 알약 · 둥근 아이콘 */
+.pf-set-prompts .pf-set-reset { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: .8em; cursor: pointer; color: var(--pf-muted); border: 1px solid var(--pf-line); }
+.pf-set-prompts .pf-set-reset i { font-size: .9em; }
+.pf-set-prompts .pf-set-reset:hover { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent); }
+.pf-ps .pf-ps-del { all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; color: var(--pf-muted); border: 1px solid var(--pf-line); }
+.pf-ps .pf-ps-del:hover { color: #d9534f; border-color: color-mix(in srgb, #d9534f 50%, transparent); background: color-mix(in srgb, #d9534f 10%, transparent); }
+.pf-set-prompts .pf-set-reset:focus-visible, .pf-ps .pf-ps-del:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
+.pf-ps .pf-ps-name { border-radius: 8px; }
+.pf-set-prompts textarea { border-radius: 10px; }
+.pf-be-trans .pf-be-trans-eng .pf-ed-chip.pf-mt-off { opacity: .45; border-style: dashed; }
+/* 도구 줄 바로 다음에 다른 확장 줄이 있을 때: 그 줄을 도구 줄 왼쪽 빈자리로 끌어올려 나란히 */
+#completion_prompt_manager .pf-toolbar.pf-bar-side + * { margin-top: calc(-1 * var(--pf-side-h, 0px)) !important; max-width: calc(100% - var(--pf-side-w, 0px) - 12px) !important; position: relative; z-index: 1; }

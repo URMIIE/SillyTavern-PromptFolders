@@ -13,6 +13,16 @@
                     <option value="custom">보기만 그룹 순서 (실제 위치는 그대로)</option>
                 </select>
             </label>
+            <label class="pf-set-row" for="pf_barPos">
+                <span>도구 줄 위치</span>
+                <select id="pf_barPos" class="text_pole">
+                    <option value="auto">자동 (다른 확장과 자리가 겹치면 비켜 감)</option>
+                    <option value="top">목록 위</option>
+                    <option value="head">「총 토큰」 줄 옆</option>
+                    <option value="side">다른 확장 줄과 나란히 (없으면 목록 위)</option>
+                    <option value="bottom">목록 맨 밑 (토글을 다 지나서)</option>
+                </select>
+            </label>
             <label class="pf-set-row" for="pf_colorStyle">
                 <span>그룹 색 표시</span>
                 <select id="pf_colorStyle" class="text_pole">
@@ -25,6 +35,31 @@
                 <span>AI로 묶기 연결</span>
                 <div id="pf_ai_host"></div>
                 <small class="pf-help">자동 그룹 미리보기의 「AI로 다시 묶기」가 쓸 연결이에요. 지금 채팅 연결 · 실리태번 연결 프로필(모델만 바꿀 수 있음) · 공급자 직접(실리태번에 저장된 키로, 모델을 골라서) 중에서 골라요. 토글 이름만 보내요.</small>
+            </div>
+            <div class="inline-drawer pf-set-prompts">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <span>AI 지시문</span>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content">
+                    <div id="pf_promptSets" class="pf-ps">
+                        <small class="pf-help">AI에게 보내는 지시문을 묶음으로 여러 개 저장해 두고 골라 쓸 수 있어요. 고른 묶음이 「AI로 다시 묶기」와 「그룹 이름 한국어로(AI)」에 쓰여요. 답 형식(JSON · 「번호 | 이름」)은 확장이 알아서 붙여요.</small>
+                        <div class="pf-ps-pills" role="radiogroup" aria-label="지시문 묶음"></div>
+                        <small class="pf-help pf-ps-default-note">기본 지시문은 고칠 수 없어요. 「새 묶음」을 누르면 지금 내용을 복사한 새 묶음이 생겨요.</small>
+                        <div class="pf-ps-namerow">
+                            <input type="text" class="text_pole pf-ps-name" placeholder="묶음 이름" maxlength="40">
+                            <button type="button" class="pf-ps-del" title="이 묶음 지우기" aria-label="이 묶음 지우기"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                        <div class="pf-set-prompt">
+                            <div class="pf-set-prompt-head"><b>AI로 묶기</b><button type="button" class="pf-set-reset" data-pf-reset="pf_aiGroupRules"><i class="fa-solid fa-rotate-left"></i>기본값으로</button></div>
+                            <textarea id="pf_aiGroupRules" class="text_pole" rows="8" spellcheck="false"></textarea>
+                        </div>
+                        <div class="pf-set-prompt">
+                            <div class="pf-set-prompt-head"><b>그룹 이름 번역 (AI)</b><button type="button" class="pf-set-reset" data-pf-reset="pf_transRules"><i class="fa-solid fa-rotate-left"></i>기본값으로</button></div>
+                            <textarea id="pf_transRules" class="text_pole" rows="3" spellcheck="false"></textarea>
+                        </div>
+                    </div>
+                </div>
             </div>
             <label class="checkbox_label" for="pf_showPos">
                 <input type="checkbox" id="pf_showPos">

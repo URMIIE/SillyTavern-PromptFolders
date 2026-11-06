@@ -10,6 +10,7 @@ import { oai_settings, promptManager } from '../../../openai.js';
 import { POPUP_TYPE, callGenericPopup } from '../../../popup.js';
 import { escapeHtml, download, getFileText } from '../../../utils.js';
 import { getPresetManager } from '../../../preset-manager.js';
+import { secret_state } from '../../../secrets.js';
 
 const KEY = 'promptFolders';
 const CONTAINER_ID = 'completion_prompt_manager';
@@ -22,7 +23,7 @@ const COLORS = ['#7b8cde', '#d9788a', '#4fae94', '#d99a55', '#a47fd1', '#4a9fc9'
 let observer = null;
 let applyTimer = null;
 
-const DEFAULTS = { presets: {}, view: 'grouped', showPos: true, wrapNames: true, syncPreset: true, colorStyle: 'dot', layout: 'real', aiMode: 'chat', aiProfile: '', aiModel: '', aiSource: '', aiSourceModel: '', aiCustomUrl: '', aiNoticeOk: false };
+const DEFAULTS = { presets: {}, view: 'grouped', showPos: true, wrapNames: true, syncPreset: true, barPos: 'auto', colorStyle: 'dot', layout: 'real', aiMode: 'chat', aiProfile: '', aiModel: '', aiSource: '', aiSourceModel: '', aiCustomUrl: '', aiNoticeOk: false };
 
 // ---------------- 화면 글자 (한국어) ----------------
 let KO = {};
@@ -89,6 +90,25 @@ function readPresetGroups() {
         const v = getPresetManager('openai')?.readPresetExtensionField({ path: KEY });
         return Array.isArray(v?.groups) ? v.groups : null;
     } catch { return null; }
+}
+
+/** 프리셋 파일에 보물상자(柏宝箱)가 넣어 둔 그룹 — 보물상자가 안 깔려 있어도 파일에 남아 있음. 없으면 null */
+function readBoxGroups() {
+    try {
+        const v = getPresetManager('openai')?.readPresetExtensionField({ path: 'baibaiToolkit' })?.presetPromptGroups;
+        if (!Array.isArray(v?.groups) || !v.groups.length) return null;
+        const by = new Map([...v.groups].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+            .map(g => [g.id, { id: newId(), name: String(g.name ?? ''), members: [], parent: null, collapsed: g.collapsed !== false }]));
+        for (const [pid, x] of Object.entries(v.prompts || {})) by.get(x?.groupId)?.members.push(pid);
+        const groups = [...by.values()].filter(g => g.members.length);
+        return groups.length ? groups : null;
+    } catch { return null; }
+}
+const boxSource = groups => ({ key: '\u0000box', label: tr`柏宝箱 (BaiBai Box) groups in this preset — ${groups.length} groups`, near: true, load: () => ({ groups, names: {} }) });
+function importFromBox() {
+    const groups = readBoxGroups();
+    if (!groups) return toastr.info(tr`This preset has no 柏宝箱 (BaiBai Box) groups.`, tr`Prompt Folders`);
+    return openGroupEditor({ sources: [boxSource(groups)] });
 }
 
 let syncTimer = null;
@@ -203,6 +223,7 @@ function hslHex(h, s, l) {
 // ---------------- 렌더링 ----------------
 
 function cleanup(container) {
+    container.querySelectorAll('.pf-toolbar').forEach(el => ownRemoved.add(el));
     container.querySelectorAll('.pf-toolbar, li.pf-group, li.pf-empty, .pf-pos, .pf-tag, .pf-check').forEach(el => el.remove());
     container.querySelectorAll('li.pf-hidden').forEach(el => el.classList.remove('pf-hidden'));
     container.querySelectorAll('li.pf-filtered').forEach(el => el.classList.remove('pf-filtered'));
@@ -730,10 +751,100 @@ function renderToolbar(list, groups) {
     bar.querySelectorAll('[role="button"]').forEach(el => el.addEventListener('keydown', ev => {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); el.click(); }
     }));
-    // 실리태번 머리 칸 바로 아래에 — 다른 확장이 목록 바로 위에 붙이는 줄과 자리다툼을 하지 않게
-    const foot = list.parentElement?.querySelector(':scope > .completion_prompt_manager_footer');
-    if (foot) foot.after(bar); else list.before(bar);
+    placeBar(bar, list);
 }
+
+// ---------------- 도구 줄 자리 ----------------
+// 자리: top = 실리태번 단추 줄 바로 아래(목록 위) · head = 「프롬프트」 제목 줄 안 · under = 제목 줄 바로 아래 · bottom = 목록 맨 밑.
+// 「자동」이면 다른 확장이 우리 줄을 자꾸 치울 때(같은 자리를 서로 차지하려 할 때) 다음 자리로 비켜 감.
+const BAR_SPOTS = ['top', 'head', 'side', 'bottom'];   // side = 다른 확장 줄과 나란히 (예전 'under' 는 side 로)
+const BAR_SPOT_KEY = 'promptFolders.barSpot.v1';
+const ownRemoved = new WeakSet();   // 우리가 치운 도구 줄 — 다툼으로 세지 않음
+let barKicks = [], barMoves = [], barQuietUntil = 0, barWatch = null;
+function autoSpot() {
+    try { const s = localStorage.getItem(BAR_SPOT_KEY); if (BAR_SPOTS.includes(s)) return s; } catch { /* 없으면 기본 */ }
+    return 'top';
+}
+function barSpot() {
+    const p = settings().barPos === 'under' ? 'side' : settings().barPos;
+    return BAR_SPOTS.includes(p) ? p : autoSpot();
+}
+function placeBar(bar, list) {
+    const wrap = list.parentElement;
+    const spot = barSpot();
+    bar.classList.toggle('pf-bar-head', spot === 'head');
+    bar.classList.toggle('pf-bar-bottom', spot === 'bottom');
+    bar.classList.toggle('pf-bar-sidespot', spot === 'side');
+    bar.classList.remove('pf-bar-side');
+    const head = wrap?.querySelector(':scope > .completion_prompt_manager_header');
+    const foot = wrap?.querySelector(':scope > .completion_prompt_manager_footer');
+    if (spot === 'head' && head) (head.firstElementChild || head).after(bar);
+    else if (spot === 'under' && head) head.after(bar);
+    else if (spot === 'bottom') list.after(bar);
+    else if (foot) foot.after(bar);
+    else list.before(bar);
+    sideBySide(bar);
+    // 처음엔 칸이 닫혀 있어 잴 수 없으니 크기가 바뀔 때(칸을 열 때 · 폭이 바뀔 때) 다시
+    if (spot === 'side' && !bar._pfRo) { bar._pfRo = new ResizeObserver(() => sideBySide(bar)); bar._pfRo.observe(bar); }
+    watchBar();
+}
+/**
+ * 목록 위 · 「총 토큰」 줄 아래 자리에서 바로 다음에 다른 확장 줄(어떤 확장이든)이 있으면,
+ * 우리 줄은 오른쪽에 그대로 두고 그 줄을 왼쪽 빈자리로 끌어올려 한 줄처럼 보이게 함 — 자리(DOM)는 안 바꿈.
+ * 그 줄이 남은 폭보다 넓으면 그 안에서 줄바꿈되고, 아주 좁으면(120px 아래) 원래대로 위아래.
+ */
+function sideBySide(bar) {
+    if (!bar?.isConnected) return;
+    const next = bar.nextElementSibling, wrap = bar.parentElement;
+    const foreign = bar.classList.contains('pf-bar-sidespot') && !!next && next.id !== LIST_ID && !next.classList.contains('completion_prompt_manager_footer') && !next.classList.contains('pf-toolbar') && !next.classList.contains('pf-group');
+    let side = false;
+    if (foreign) {
+        const kids = [...bar.children].filter(k => k.offsetParent);
+        if (kids.length) {
+            const left = Math.min(...kids.map(k => k.getBoundingClientRect().left)), right = Math.max(...kids.map(k => k.getBoundingClientRect().right));
+            const w = Math.ceil(right - left), room = bar.getBoundingClientRect().width - w;
+            if (room >= 120) {
+                side = true;
+                const cs = getComputedStyle(bar), h = Math.ceil(bar.getBoundingClientRect().height + parseFloat(cs.marginBottom || 0) + parseFloat(getComputedStyle(next).marginTop || 0) * 0);
+                if (wrap.style.getPropertyValue('--pf-side-w') !== `${w}px`) wrap.style.setProperty('--pf-side-w', `${w}px`);
+                if (wrap.style.getPropertyValue('--pf-side-h') !== `${h}px`) wrap.style.setProperty('--pf-side-h', `${h}px`);
+            }
+        }
+    }
+    if (bar.classList.contains('pf-bar-side') !== side) bar.classList.toggle('pf-bar-side', side);
+}
+/** 다른 확장이 우리 도구 줄을 치우면 다시 놓음 — 3초 안에 3번째면 다툼으로 보고 (자동일 때) 다음 자리로 */
+function watchBar() {
+    if (barWatch) return;
+    const container = document.getElementById(CONTAINER_ID);
+    if (!container) return;
+    barWatch = new MutationObserver(records => {
+        sideBySide(document.querySelector(`#${CONTAINER_ID} .pf-toolbar`));
+        const kicked = records.some(r => [...r.removedNodes].some(n => n.nodeType === 1 && n.classList?.contains('pf-toolbar') && !ownRemoved.has(n) && !n.isConnected));
+        if (!kicked || document.querySelector(`#${CONTAINER_ID} .pf-toolbar`)) return;
+        const now = Date.now();
+        if (now < barQuietUntil) return;   // 너무 자주 치우면 잠깐 쉼 (서로 끝없이 다시 놓지 않게)
+        barKicks = barKicks.filter(t => now - t < 3000);
+        barKicks.push(now);
+        if (barKicks.length >= 3) {
+            barKicks = [];
+            barMoves = barMoves.filter(t => now - t < 60000);
+            if (settings().barPos === 'auto' && barMoves.length < BAR_SPOTS.length - 1) {
+                barMoves.push(now);
+                const next = BAR_SPOTS[(BAR_SPOTS.indexOf(autoSpot()) + 1) % BAR_SPOTS.length];
+                try { localStorage.setItem(BAR_SPOT_KEY, next); } catch { /* 이번 화면에서만 */ }
+                toastr.info(tr`Another extension kept taking the toolbar's spot, so it moved to: ${spotLabel(next)}`, tr`Prompt Folders`);
+            } else {
+                // 자리를 다 옮겨 봐도(또는 자리를 직접 정했는데) 계속 치우면 1분 쉼 — 서로 끝없이 다시 놓지 않게
+                barQuietUntil = now + 60000;
+                return;
+            }
+        }
+        setTimeout(() => { if (!document.querySelector(`#${CONTAINER_ID} .pf-toolbar`)) apply(); }, 30);
+    });
+    barWatch.observe(container, { childList: true, subtree: true });
+}
+const spotLabel = s => ({ top: tr`above the list`, head: tr`next to the Prompts title`, side: tr`beside other extensions' rows`, bottom: tr`at the very bottom of the list` })[s] || s;
 
 /** 그룹 관계(상위/하위)를 다루는 도우미 */
 function makeTree(groups) {
@@ -1079,6 +1190,7 @@ function openToolsMenu(anchor) {
     item('fa-file-export', tr`Export groups`, exportGroups);
     item('fa-file-import', tr`Import groups`, importGroups);
     item('fa-code-branch', tr`Bring groups from another preset`, importFromPreset);
+    if (readBoxGroups()) item('fa-box-open', tr`Bring groups from 柏宝箱 (BaiBai Box)`, importFromBox);
     if (presetData().groups.length) {
         const sepU = document.createElement('div');
         sepU.className = 'pf-menu-sep';
@@ -1538,14 +1650,36 @@ function fitIntoGroups(order, groups, plan, nameOf, dividers = new Set(), W = {}
 }
 
 // AI 로 묶기: 토글 이름 · 내용 앞부분을 지금 연결된 API 로 한 번 보내 그룹 계획을 받음 (번호로 주고받아 이름이 바뀌어도 안전)
-const AI_GROUP_PROMPT = `You organise the prompt toggles of a SillyTavern preset into folders so a user can find them quickly.
-Input: one line per toggle — index | name. Only names are given, not the prompt text. Names may be decorated with symbols; markers like ⤵/⤴, start/end, <tag>/</tag> or blank names often open and close sections.
+// AI 지시문 = 고칠 수 있는 부분(확장 설정에서) + 답 형식(늘 붙임, 지우면 답을 못 읽음)
+const AI_GROUP_FORMAT = `Input: one line per toggle — index | name. Only names are given, not the prompt text.
 Return ONLY JSON: {"groups":[{"name":"","items":[0,1],"children":[{"name":"","items":[2,3]}]}]}
+Never nest deeper than one level of children.`;
+const AI_GROUP_RULES = `You organise the prompt toggles of a SillyTavern preset into folders so a user can find them quickly.
+Names may be decorated with symbols; markers like ⤵/⤴, start/end, <tag>/</tag> or blank names often open and close sections.
 - Follow the preset's own sections when it has them; otherwise group by purpose (language, POV, style, pacing, NSFW, trackers, reasoning, jailbreak/system, etc.).
 - Put "pick one" alternatives together. Keep a section's opening and closing marker in that section's group.
 - Prefer neighbouring toggles; each index at most once; toggles that fit nowhere can stay out.
-- At most two levels: 4 to 12 top-level groups, and inside a top-level group put children (sub-folders, at least 2 items each) when it holds two or more distinct sets — e.g. a style category with separate "pick one" sets. Never nest deeper than that.
+- At most two levels: 4 to 12 top-level groups, and inside a top-level group put children (sub-folders, at least 2 items each) when it holds two or more distinct sets — e.g. a style category with separate "pick one" sets.
 - name: short Korean (2–12 characters) starting with one fitting emoji, e.g. "🌐 언어", "🎬 문체".`;
+const TRANS_FORMAT = 'Reply with exactly one line per label in the form "number | translated label" and nothing else.';
+const TRANS_RULES = 'Translate each group label into short, natural Korean, as a Korean user would name a folder of prompt toggles. Keep emoji, symbols and Latin words as they are.';
+// 지시문 묶음: settings.promptSets = [{ id, name, group, trans }], settings.promptSet = 고른 묶음 id ('' = 기본)
+function promptSets() {
+    const s = settings();
+    if (!Array.isArray(s.promptSets)) s.promptSets = [];
+    // 예전 판(지시문 하나만 고치던 것)에서 이어받기
+    if (s.aiGroupRules || s.transRules) {
+        const id = newId();
+        s.promptSets.push({ id, name: tr`My instructions`, group: s.aiGroupRules || AI_GROUP_RULES, trans: s.transRules || TRANS_RULES });
+        s.promptSet = id;
+        delete s.aiGroupRules; delete s.transRules;
+        saveSettingsDebounced();
+    }
+    return s.promptSets;
+}
+const activeSet = () => promptSets().find(x => x.id === settings().promptSet) || null;
+const groupPrompt = () => `${String(activeSet()?.group || '').trim() || AI_GROUP_RULES}\n\n${AI_GROUP_FORMAT}`;
+const transPrompt = () => `${String(activeSet()?.trans || '').trim() || TRANS_RULES}\n${TRANS_FORMAT}`;
 
 // 「그룹 없는 토글만」에서 기존 그룹을 같이 보낼 때 덧붙이는 지시
 const AI_INTO_PROMPT = `
@@ -1650,6 +1784,39 @@ async function aiCall(system, prompt, signal) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error) throw new Error(data.error?.message || `${res.status}`);
     return String(data.choices?.[0]?.message?.content ?? (data.candidates?.[0]?.content?.parts || []).filter(x => !x.thought).map(x => x.text || '').join(''));
+}
+
+/** 그룹 이름 한국어로: 한자 · 가나가 있고 한글이 없는 이름만 */
+const needsKo = s => /[\u3400-\u9fff\u3040-\u30ff]/.test(s) && !/[\uac00-\ud7a3]/.test(s);
+/** 실리태번 서버의 기계 번역기 — [id, 이름, 필요한 저장 키(없으면 바로 씀)] */
+const MT_ENGINES = [['google', 'Google'], ['bing', 'Bing'], ['yandex', 'Yandex'], ['deepl', 'DeepL', 'deepl'], ['deeplx', 'DeepLX', 'deeplx_url'], ['lingva', 'Lingva', 'lingva_url'], ['libre', 'LibreTranslate', 'libre_url']];
+const mtReady = () => MT_ENGINES.filter(([, , key]) => { if (!key) return true; const v = secret_state?.[key]; return Array.isArray(v) ? v.length > 0 : !!v; });
+function mtEngine() {
+    const id = settings().transEngine;
+    return mtReady().some(x => x[0] === id) ? id : 'google';
+}
+const mtName = id => MT_ENGINES.find(x => x[0] === id)?.[1] || id;
+async function machineKo(text) {
+    const engine = mtEngine();
+    const body = engine === 'yandex' ? { chunks: [text], lang: 'ko' } : { text, lang: 'ko' };
+    const res = await fetch(`/api/translate/${engine}`, { method: 'POST', headers: SillyTavern.getContext().getRequestHeaders(), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`${res.status}`);
+    return (await res.text()).trim();
+}
+async function translateNames(names, how) {
+    if (how === 'ai') {
+        const txt = await aiCall(transPrompt(), names.map((n, i) => `${i + 1} | ${n}`).join('\n'));
+        const out = [];
+        for (const line of txt.split('\n')) { const m = line.match(/^\s*(\d+)\s*[|｜.:)]\s*(.+)$/); if (m) out[+m[1] - 1] = m[2].trim(); }
+        return names.map((n, i) => out[i] || n);
+    }
+    // 기계 번역: 한 번에 보내고, 줄 수가 안 맞으면 하나씩
+    const joined = await machineKo(names.join('\n')).catch(() => '');
+    const lines = joined.split('\n').map(s => s.trim());
+    if (lines.length === names.length && lines.every(Boolean)) return lines;
+    const out = [];
+    for (const n of names) out.push(await machineKo(n).catch(() => n) || n);
+    return out;
 }
 
 /** 지금 고른 연결을 사람이 읽는 글로 */
@@ -1777,7 +1944,7 @@ async function aiPlan(order, getPrompt, signal, existing = null) {
     const known = (existing || []).filter(g => g.members?.length);
     const groupLines = known.map((g, i) => `G${i} | ${String(g.name || '').trim() || '(no name)'} | ${g.members.slice(0, 3).map(id => String(getPrompt(id)?.name ?? '').trim()).filter(Boolean).join(', ')}`);
     const prompt = known.length ? `${lines.join('\n')}\n\nExisting groups:\n${groupLines.join('\n')}` : lines.join('\n');
-    const raw = await aiCall(known.length ? AI_GROUP_PROMPT + AI_INTO_PROMPT : AI_GROUP_PROMPT, prompt, signal);
+    const raw = await aiCall(known.length ? groupPrompt() + AI_INTO_PROMPT : groupPrompt(), prompt, signal);
     let rows, intoRows;
     try { const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)); rows = j.groups; intoRows = j.into; } catch { throw new Error(tr`Couldn't read the AI answer. Try again.`); }
     const used = new Set();
@@ -1904,9 +2071,11 @@ async function importFromPreset() {
     const list = Object.entries(settings().presets).filter(([k, v]) => nfcName(k) !== nfcName(here) && v?.groups?.length)
         .map(([k, v]) => ({ k, n: v.groups.length, near: stem(k) && stem(k) === stem(here) }))
         .sort((a, b) => (b.near - a.near) || (a.near ? b.k.localeCompare(a.k, undefined, { numeric: true }) : a.k.localeCompare(b.k)));   // 같은 이름 프리셋은 최신 버전 먼저
-    if (!list.length) return toastr.info(tr`No other preset has groups yet.`, tr`Prompt Folders`);
+    const box = readBoxGroups();
+    if (!list.length && !box) return toastr.info(tr`No other preset has groups yet.`, tr`Prompt Folders`);
     const namesOf = from => { try { return Object.fromEntries((getPresetManager('openai')?.getCompletionPresetByName(from)?.prompts || []).map(p => [p.identifier, p.name || ''])); } catch { return {}; } };   // 없으면 id 로만
-    await openGroupEditor({ sources: list.map(x => ({ key: x.k, label: `${x.k} — ${tr`${x.n} groups`}`, near: x.near, load: () => ({ groups: settings().presets[x.k].groups, names: namesOf(x.k) }) })) });
+    // 이 프리셋 파일에 보물상자 그룹이 있으면 맨 위에
+    await openGroupEditor({ sources: [...(box ? [boxSource(box)] : []), ...list.map(x => ({ key: x.k, label: `${x.k} — ${tr`${x.n} groups`}`, near: x.near, load: () => ({ groups: settings().presets[x.k].groups, names: namesOf(x.k) }) }))] });
 }
 
 /** 그룹 색 고르기: 서로 어울리는 견본 10개 + 자동(이모지·차례) + 직접 고르기 */
@@ -2233,7 +2402,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     const root = document.createElement('div');
     root.className = 'pf-editor pf-be' + (scopeId ? ' pf-be-scope' : '');
     root.innerHTML = `
-        <h3 class="pf-ed-title">${e(imp ? tr`Bring groups from another preset` : auto ? tr`Auto-group` : scopeId ? tr`Edit this group` : tr`Edit groups`)}</h3>
+        <h3 class="pf-ed-title">${e(imp ? (imp.length === 1 && imp[0].key === '\u0000box' ? tr`Bring groups from 柏宝箱 (BaiBai Box)` : tr`Bring groups from another preset`) : auto ? tr`Auto-group` : scopeId ? tr`Edit this group` : tr`Edit groups`)}</h3>
         <div class="pf-ed-summary"></div>
         ${imp ? `${imp.length > 1 ? `<select class="text_pole pf-imp-from" aria-label="${e(tr`Bring from`)}">${impOptions()}</select>` : ''}
         <div class="pf-imp-stats"></div>` : ''}
@@ -2242,6 +2411,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
             <button type="button" class="pf-ed-chip" data-m="free" role="radio">${e(tr`Only toggles not in a group`)}</button>
             <button type="button" class="pf-ed-chip" data-m="all" role="radio">${e(tr`Regroup everything`)}</button>
         </div>` : ''}
+        <div class="pf-be-trans" hidden><button type="button" class="pf-be-trans-run"><i class="fa-solid fa-language"></i><span>${e(tr`Group names in Korean`)}</span></button><div class="pf-be-trans-how" role="radiogroup" aria-label="${e(tr`How to translate`)}"><button type="button" class="pf-ed-chip" role="radio" data-how="machine">${e(tr`Machine translation`)}</button><button type="button" class="pf-ed-chip" role="radio" data-how="ai">${e(tr`AI`)}</button></div><small class="pf-be-trans-note"></small><div class="pf-be-trans-eng" role="radiogroup" aria-label="${e(tr`Translator`)}" hidden>${MT_ENGINES.filter(([id]) => ['google', 'bing', 'yandex', 'deepl'].includes(id) || mtReady().some(x => x[0] === id)).map(([id, name]) => { const ok = mtReady().some(x => x[0] === id); return `<button type="button" class="pf-ed-chip${ok ? '' : ' pf-mt-off'}" role="radio" data-eng="${e(id)}"${ok ? '' : ` title="${e(tr`Add your ${name} key in SillyTavern's Translate extension to use it.`)}"`}>${e(name)}</button>`; }).join('')}</div><div class="pf-be-trans-conn" hidden>${aiPickersHtml()}</div></div>
         <div class="pf-be-panes">
             <section class="pf-be-groups">
                 <div class="pf-be-head"><b>${e(tr`Groups`)}</b><button type="button" class="pf-tb pf-be-add"><i class="fa-solid fa-plus"></i> ${e(tr`New group`)}</button></div>
@@ -2270,12 +2440,56 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     const treeEl = root.querySelector('.pf-be-tree'), list = root.querySelector('.pf-ed-list');
     const count = root.querySelector('.pf-ed-count'), putBtn = root.querySelector('.pf-be-put'), outBtn = root.querySelector('.pf-be-out');
     const summary = root.querySelector('.pf-ed-summary');
+    // 한자 · 가나 그룹 이름 → 한국어 (가져온 보물상자 그룹, 중국어 프리셋에서 자동으로 지은 이름 등)
+    const transBox = root.querySelector('.pf-be-trans');
+    const transNote = transBox.querySelector('.pf-be-trans-note');
+    const transRun = transBox.querySelector('.pf-be-trans-run');
+    let transWay = settings().transHow === 'ai' ? 'ai' : 'machine';
+    const origName = new Map();   // 번역 전 원래 이름 — 다시 번역할 땐 늘 원래 이름에서
+    const paintTrans = () => {
+        transBox.querySelectorAll('.pf-be-trans-how .pf-ed-chip').forEach(b => b.setAttribute('aria-checked', String(b.dataset.how === transWay)));
+        transNote.textContent = transWay === 'ai' ? tr`Sends only the group names to ${aiTargetLabel()}.` : tr`Sends only the group names to ${mtName(mtEngine())}.`;
+        transRun.querySelector('span').textContent = origName.size ? tr`Translate again` : tr`Group names in Korean`;
+        transConn.hidden = transWay !== 'ai';
+        transEng.hidden = transWay === 'ai';
+        transEng.querySelectorAll('.pf-ed-chip').forEach(b => b.setAttribute('aria-checked', String(b.dataset.eng === mtEngine())));
+    };
+    // 기계 번역기 고르기 (키 · 주소가 필요한 번역기는 실리태번에 저장돼 있을 때만 보임)
+    const transEng = transBox.querySelector('.pf-be-trans-eng');
+    transEng.querySelectorAll('.pf-ed-chip').forEach(b => b.addEventListener('click', () => {
+        if (b.classList.contains('pf-mt-off')) return void toastr.info(b.title, tr`Prompt Folders`);   // 키가 없는 번역기(DeepL 등): 넣는 곳 안내
+        settings().transEngine = b.dataset.eng; saveSettingsDebounced(); paintTrans();
+    }));
+    // AI 연결: 지금 채팅 연결 · 연결 프로필 · 공급자 직접 (「AI로 묶기 연결」과 같은 설정)
+    const transConn = transBox.querySelector('.pf-be-trans-conn');
+    bindAiPickers(transConn);
+    ['click', 'change'].forEach(t => transConn.addEventListener(t, () => setTimeout(paintTrans)));
+    paintTrans();
+    transBox.querySelectorAll('.pf-be-trans-how .pf-ed-chip').forEach(b => b.addEventListener('click', () => { transWay = b.dataset.how; settings().transHow = transWay; saveSettingsDebounced(); paintTrans(); }));
+    // 한 번 번역한 뒤에도 남김 (다른 방법으로 다시 번역할 수 있게)
+    function updateTrans() { transBox.hidden = !origName.size && !draft.some(g => needsKo(g.name)); }
+    transRun.addEventListener('click', async () => {
+        if (transRun.classList.contains('pf-busy')) return;
+        const todo = draft.filter(g => origName.has(g.id) || needsKo(g.name));
+        if (!todo.length) return;
+        todo.forEach(g => { if (!origName.has(g.id)) origName.set(g.id, g.name); });
+        transRun.classList.add('pf-busy');
+        try {
+            const out = await translateNames(todo.map(g => origName.get(g.id)), transWay);
+            let n = 0;
+            todo.forEach((g, i) => { const t = String(out[i] || '').trim(); if (t && t !== g.name) { g.name = t.slice(0, 80); n++; } });
+            renderTree(); refreshTags(); refilter();
+            toastr.success(tr`Translated ${n} group names.`, tr`Prompt Folders`);
+        } catch (err) {
+            toastr.error(`${tr`Group names in Korean`}: ${String(err?.message || err)}`, tr`Prompt Folders`);
+        } finally { transRun.classList.remove('pf-busy'); paintTrans(); }
+    });
     const setSummary = text => { summary.textContent = text; };
     // 기존 그룹에 넣은 것 · 새 그룹 수 안내
     const intoNote = () => { const fresh = draft.filter(g => !isOld(g)).length; return tr`${fitInto.size} leftover toggles go into existing groups and ${fresh} new groups are made. Changes are marked New — pick "Changed this time" to see only them. Fix anything, then create.`; };
     const ungroupedCount = () => { const g = new Set(data.groups.flatMap(x => x.members)); return order.filter(x => !g.has(x.id)).length; };
     const noneLeft = () => auto && mode === 'free' && !ungroupedCount();
-    setSummary(imp ? tr`Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.` : noneLeft() ? tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.` : auto ? (mode === 'free' && fitInto.size ? intoNote() : plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
+    setSummary(imp && impSrc.key === '\u0000box' ? tr`These are the groups the preset maker saved in this preset file with 柏宝箱 (BaiBai Box). Fix anything here, then bring. The current groups of this preset are replaced.` : imp ? tr`Toggles are matched by the same id first, then by the same name. A toggle new in this preset joins a group when the toggles before and after it are in that group. Fix anything here, then bring. The current groups of this preset are replaced.` : noneLeft() ? tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.` : auto ? (mode === 'free' && fitInto.size ? intoNote() : plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`) : tr`Pick a group on the left, pick toggles on the right, then put them in. Up to two levels.`);
 
     const tree = () => makeTree(draft);
     const groupOf = id => draft.find(g => g.members.includes(id)) || null;
@@ -2312,6 +2526,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
     const colorOf = g => { const t = tree(); return groupColor(g, t.indexOf(g), t); };
 
     function renderTree() {
+        updateTrans();
         const t = tree();
         const scopeRoot = scopeId ? draft.find(x => x.id === scopeId) : null;
         const tops = scopeRoot ? [scopeRoot] : draft.filter(g => !t.parentOf(g)).sort(bySpot);
@@ -2551,7 +2766,7 @@ async function openGroupEditor({ focusId = null, addNew = false, newParent = nul
         };
         root.querySelectorAll('.pf-be-mode .pf-ed-chip').forEach(c => c.addEventListener('click', () => { mode = c.dataset.m; draft = autoDraft(); sel = null; paintMode(); setSummary(mode === 'free' && fitInto.size ? intoNote() : plan.length ? tr`Grouped by divider toggles and similar names. Fix names, move toggles, then create.` : tr`Couldn't find anything to group automatically in this preset. Try regrouping with AI.`); if (noneLeft()) setSummary(tr`Every toggle is already in a group, so there is nothing to group. Pick "Regroup everything" to start over.`); renderTree(); refreshTags(); refilter(); }));
         paintMode();
-        bindAiPickers(root);
+        bindAiPickers(root.querySelector('.pf-auto-ai'));
         const aiBtn = root.querySelector('.pf-auto-ai-run');
         let running = null;
         aiBtn.addEventListener('click', async () => {
@@ -2860,6 +3075,57 @@ function init() {
 
 // ---------------- 설정 화면 ----------------
 
+/** 확장 설정 「AI 지시문」: 묶음 알약(기본 + 저장한 것) · 이름 · 두 지시문 · 새로 저장 · 지우기 */
+function bindPromptSets() {
+    const box = document.getElementById('pf_promptSets');
+    if (!box) return;
+    const e = escapeHtml;
+    const pills = box.querySelector('.pf-ps-pills'), nameIn = box.querySelector('.pf-ps-name'), del = box.querySelector('.pf-ps-del');
+    const ga = document.getElementById('pf_aiGroupRules'), tr2 = document.getElementById('pf_transRules');
+    const paint = () => {
+        const sets = promptSets(), cur = activeSet();
+        pills.innerHTML = `<button type="button" class="pf-ed-chip" role="radio" data-set="" aria-checked="${!cur}">${e(tr`Default`)}</button>`
+            + sets.map(x => `<button type="button" class="pf-ed-chip" role="radio" data-set="${e(x.id)}" aria-checked="${cur?.id === x.id}">${e(x.name || tr`(no name)`)}</button>`).join('')
+            + `<button type="button" class="pf-ps-add" title="${e(tr`Save the instructions below as a new set`)}"><i class="fa-solid fa-plus"></i> ${e(tr`New set`)}</button>`;
+        box.classList.toggle('pf-ps-default', !cur);
+        nameIn.value = cur?.name || '';
+        ga.value = cur ? (cur.group || AI_GROUP_RULES) : AI_GROUP_RULES;
+        tr2.value = cur ? (cur.trans || TRANS_RULES) : TRANS_RULES;
+        ga.readOnly = tr2.readOnly = !cur;
+        nameIn.closest('.pf-ps-namerow').hidden = !cur;
+    };
+    pills.addEventListener('click', ev => {
+        const b = ev.target.closest('button');
+        if (!b) return;
+        if (b.classList.contains('pf-ps-add')) {
+            const sets = promptSets();
+            const x = { id: newId(), name: tr`Instructions ${sets.length + 1}`, group: ga.value.trim() || AI_GROUP_RULES, trans: tr2.value.trim() || TRANS_RULES };
+            sets.push(x);
+            settings().promptSet = x.id;
+        } else settings().promptSet = b.dataset.set || '';
+        saveSettingsDebounced();
+        paint();
+        if (b.classList.contains('pf-ps-add')) nameIn.select();
+    });
+    nameIn.addEventListener('input', () => { const cur = activeSet(); if (!cur) return; cur.name = nameIn.value; saveSettingsDebounced(); pills.querySelector(`[data-set="${CSS.escape(cur.id)}"]`).textContent = cur.name || tr`(no name)`; });
+    ga.addEventListener('input', () => { const cur = activeSet(); if (cur) { cur.group = ga.value; saveSettingsDebounced(); } });
+    tr2.addEventListener('input', () => { const cur = activeSet(); if (cur) { cur.trans = tr2.value; saveSettingsDebounced(); } });
+    box.querySelectorAll('[data-pf-reset]').forEach(b => b.addEventListener('click', () => {
+        const cur = activeSet(); if (!cur) return;
+        if (b.dataset.pfReset === 'pf_aiGroupRules') { cur.group = AI_GROUP_RULES; ga.value = AI_GROUP_RULES; } else { cur.trans = TRANS_RULES; tr2.value = TRANS_RULES; }
+        saveSettingsDebounced();
+    }));
+    del.addEventListener('click', async () => {
+        const cur = activeSet(); if (!cur) return;
+        if (!(await callGenericPopup(escapeHtml(tr`Delete the instruction set "${cur.name || tr`(no name)`}"?`), POPUP_TYPE.CONFIRM))) return;
+        settings().promptSets = promptSets().filter(x => x !== cur);
+        settings().promptSet = '';
+        saveSettingsDebounced();
+        paint();
+    });
+    paint();
+}
+
 async function addSettingsPanel() {
     const host = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
     if (!host || document.getElementById('pf_settings')) return;
@@ -2882,6 +3148,12 @@ async function addSettingsPanel() {
         cs.value = settings().colorStyle || 'dot';
         cs.addEventListener('change', () => { settings().colorStyle = cs.value; saveSettingsDebounced(); apply(); });
     }
+    const bp = document.getElementById('pf_barPos');
+    if (bp) {
+        bp.value = settings().barPos || 'auto';
+        bp.addEventListener('change', () => { settings().barPos = bp.value; saveSettingsDebounced(); apply(); });
+    }
+    bindPromptSets();
     for (const key of ['showPos', 'wrapNames', 'syncPreset']) {
         const cb = document.getElementById(`pf_${key}`);
         if (!cb) continue;
