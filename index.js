@@ -730,7 +730,9 @@ function renderToolbar(list, groups) {
     bar.querySelectorAll('[role="button"]').forEach(el => el.addEventListener('keydown', ev => {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); el.click(); }
     }));
-    list.before(bar);
+    // 실리태번 머리 칸 바로 아래에 — 다른 확장이 목록 바로 위에 붙이는 줄과 자리다툼을 하지 않게
+    const foot = list.parentElement?.querySelector(':scope > .completion_prompt_manager_footer');
+    if (foot) foot.after(bar); else list.before(bar);
 }
 
 /** 그룹 관계(상위/하위)를 다루는 도우미 */
@@ -838,6 +840,11 @@ function commitToggles(ids = []) {
     if (counts) ids.forEach(id => { counts[id] = null; });
     paintStates();
     promptManager?.saveServiceSettings();
+    // 그 자리에서 색만 바꾸면 목록을 지켜보는 다른 확장(지금 켜진 토글을 보고 무언가 표시하는 것)이 바뀐 줄 모름
+    // → 보이지 않는 표시를 잠깐 넣었다 빼서 알림 (우리 감시는 요소만 보므로 다시 그리지 않음)
+    const mark = document.createComment('pf');
+    document.getElementById(CONTAINER_ID)?.append(mark);
+    mark.remove();
     clearTimeout(tokenTimer);
     tokenTimer = setTimeout(recountTokens, 800);
 }
@@ -2821,8 +2828,9 @@ function init() {
     eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, scheduleApply);
     observer = new MutationObserver(mutations => {
         // ST가 목록을 다시 그렸거나 줄 순서가 바뀐 경우에만 다시 적용
+        // 목록 밖(다른 확장이 목록 위에 붙이는 줄 등)의 변화는 무시 — 서로 다시 그리며 끝없이 도는 것을 막음
         const relevant = mutations.some(m => [...m.addedNodes, ...m.removedNodes].some(n =>
-            n.nodeType === 1 && !(n.classList?.contains('pf-group') || n.classList?.contains('pf-toolbar') || n.classList?.contains('pf-end-zone') || n.classList?.contains('ui-sortable-placeholder') || n.classList?.contains('cpm-bar') || n.classList?.contains('pf-empty'))));
+            n.nodeType === 1 && (m.target.id === LIST_ID || n.id === LIST_ID || n.tagName === 'LI' || n.querySelector?.(`#${LIST_ID}`)) && !(n.classList?.contains('pf-group') || n.classList?.contains('pf-toolbar') || n.classList?.contains('pf-end-zone') || n.classList?.contains('ui-sortable-placeholder') || n.classList?.contains('cpm-bar') || n.classList?.contains('pf-empty'))));
         if (relevant) scheduleApply();
     });
     resume();
