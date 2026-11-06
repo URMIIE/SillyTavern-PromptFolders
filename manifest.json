@@ -1,5 +1,5 @@
 {
-    "display_name": "프롬프트 그룹",
+    "display_name": "프롬프트 토글 그룹",
     "loading_order": 100,
     "js": "index.js",
     "css": "style.css",
