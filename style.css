@@ -21,8 +21,9 @@ html body #completion_prompt_manager #completion_prompt_manager_list > li.pf-hid
 .pf-group:not(.pf-sub) > .pf-group-head > .pf-name { font-weight: 600; }
 .pf-name::before { content: ''; display: inline-block; width: 7px; height: 7px; margin: 0 8px 1px 0; border-radius: 50%; background: var(--pf-color, var(--pf-muted)); vertical-align: middle; }
 .pf-count { flex: none; font-size: .82em; color: var(--pf-muted); font-variant-numeric: tabular-nums; }
-.pf-btn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; cursor: pointer; color: var(--pf-muted); }
-.pf-btn:hover { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent); }
+/* 단추 크기 규칙은 그룹 머리줄 안에서만 — 클래스 이름이 같은 다른 화면의 글자 단추까지 26px 상자로 줄어들었음(2026-11-07) */
+.pf-group-head .pf-btn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 5px; cursor: pointer; color: var(--pf-muted); }
+.pf-group-head .pf-btn:hover { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent); }
 .pf-toggle-all.fa-toggle-on { color: var(--SmartThemeBodyColor); }
 .pf-group-head.pf-drop-target { background: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent); box-shadow: inset 0 0 0 1px var(--SmartThemeQuoteColor); }
 body.pf-dragging, body.pf-dragging * { user-select: none !important; cursor: grabbing !important; }
@@ -133,7 +134,7 @@ body.pf-wrap-names #completion_prompt_manager #completion_prompt_manager_list .c
     .pf-toolbar > .pf-ib:last-child { width: 1.9em; }  /* 맨 끝 단추만 좁게 — 아이콘은 가운데 그대로, 오른쪽 끝이 위 줄과 거의 맞음 */
     .pf-toolbar .pf-search { height: 36px; }
     .pf-group-head { padding: 6px 8px; }
-    .pf-btn { padding: 4px 6px; }
+    .pf-group-head .pf-btn { padding: 4px 6px; }
 }
 
 /* ---------- 그룹 색 표시 방식 (설정: 점 / 색 띠 / 없음) ---------- */
