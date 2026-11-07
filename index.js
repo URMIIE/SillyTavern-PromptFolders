@@ -818,8 +818,10 @@ function watchBar() {
     if (barWatch) return;
     const container = document.getElementById(CONTAINER_ID);
     if (!container) return;
+    let sideFrame = 0;
     barWatch = new MutationObserver(records => {
-        sideBySide(document.querySelector(`#${CONTAINER_ID} .pf-toolbar`));
+        // 자리 재기는 한 화면(프레임)에 한 번만 — 바뀔 때마다 바로 재면 채팅을 열 때 프롬프트 목록을 다시 그리는 동안 레이아웃을 수십 번 다시 계산함(0.17초)
+        if (!sideFrame) sideFrame = requestAnimationFrame(() => { sideFrame = 0; sideBySide(document.querySelector(`#${CONTAINER_ID} .pf-toolbar`)); });
         const kicked = records.some(r => [...r.removedNodes].some(n => n.nodeType === 1 && n.classList?.contains('pf-toolbar') && !ownRemoved.has(n) && !n.isConnected));
         if (!kicked || document.querySelector(`#${CONTAINER_ID} .pf-toolbar`)) return;
         const now = Date.now();
