@@ -50,10 +50,11 @@ function presetKey() {
 function presetData() {
     const s = settings();
     const k = presetKey();
-    if (!s.presets[k]) {
-        // First time for this preset here: take the groups stored inside the preset file, if any
+    // 처음 보는 프리셋이거나 그룹이 비어 있으면 프리셋 파일에 든 그룹을 가져옴
+    // (비어 있는 항목이 남아 있으면 같은 이름의 새 판 파일에 든 그룹을 못 읽었음)
+    if (!s.presets[k]?.groups?.length) {
         const shared = readPresetGroups();
-        s.presets[k] = { groups: shared ? structuredClone(shared) : [] };
+        s.presets[k] = { ...(s.presets[k] || {}), groups: shared?.length ? structuredClone(shared) : [] };
     }
     applyFolds(k, s.presets[k]);
     return s.presets[k];
@@ -83,6 +84,20 @@ function rememberFolds(groups) {
     const map = (st[presetKey()] ||= {});
     for (const g of groups) map[g.id] = !!g.collapsed;
     try { localStorage.setItem(FOLD_KEY, JSON.stringify(st)); } catch { /* 저장소를 못 쓰면 메모리에만 */ }
+}
+
+/** 시작 때 한 번: 그룹이 빈 항목 · (그룹이 프리셋 파일에도 저장될 때) 지운 프리셋의 항목을 설정에서 뺌 */
+function pruneSettings() {
+    const s = settings();
+    let names = null;
+    try { const n = getPresetManager('openai')?.getPresetList()?.preset_names; names = n ? new Set((Array.isArray(n) ? n : Object.keys(n)).map(x => String(x).normalize('NFC'))) : null; } catch { names = null; }
+    let removed = 0;
+    for (const [k, v] of Object.entries(s.presets || {})) {
+        const empty = !v?.groups?.length;
+        const gone = !!names?.size && s.syncPreset && !names.has(k.normalize('NFC'));
+        if (empty || gone) { delete s.presets[k]; removed++; }
+    }
+    if (removed) saveSettingsDebounced();
 }
 
 function readPresetGroups() {
@@ -122,7 +137,10 @@ function syncToPreset() {
             const groups = settings().presets[name]?.groups;
             if (!groups) return;
             const pm = getPresetManager('openai');
-            if (JSON.stringify(pm?.readPresetExtensionField({ name, path: KEY })?.groups ?? null) === JSON.stringify(groups)) return;
+            // 지금 프리셋이면 readPresetExtensionField 는 메모리 쪽(설정)을 읽어서, 파일이 밖에서 바뀌어도 「같다」고 넘어갔음 → 파일 쪽 사본과 비교
+            const inFile = pm?.getCompletionPresetByName?.(name)?.extensions?.[KEY]?.groups ?? null;
+            const inMemory = pm?.readPresetExtensionField({ name, path: KEY })?.groups ?? null;
+            if (JSON.stringify(inFile) === JSON.stringify(groups) && JSON.stringify(inMemory) === JSON.stringify(groups)) return;
             await pm?.writePresetExtensionField({ name, path: KEY, value: { version: 1, groups } });
         } catch (err) {
             console.warn('[Prompt Folders] preset sync failed', err);
@@ -274,6 +292,14 @@ function apply() {
             badge.title = tr`Real position #${i + 1}` + '\n' + tr`Before: ${prev}` + '\n' + tr`After: ${next}`;
             nameSpan.prepend(badge);
         });
+
+        // 다른 확장 · 실리태번이 켠 토글에도 택1 지키기 (우리 길로 바꾼 건 lastOn 이 이미 같아서 그대로)
+        if (lastOn && lastOn.key === presetKey()) {
+            const before = new Set([...lastOn.map].filter(([, v]) => v).map(([k]) => k));
+            const off = enforceExclusive(before, null, true);
+            if (off) toastr.info(escapeHtml(tr`Pick-one group: turned off ${off} other toggles.`), tr`Prompt Folders`);
+        }
+        rememberOn();
 
         const data = presetData();
         const groups = data.groups;
@@ -755,7 +781,7 @@ function renderToolbar(list, groups) {
 }
 
 // ---------------- 도구 줄 자리 ----------------
-// 자리: top = 실리태번 단추 줄 바로 아래(목록 위) · head = 「프롬프트」 제목 줄 안 · under = 제목 줄 바로 아래 · bottom = 목록 맨 밑.
+// 자리: top = 실리태번 단추 줄 바로 아래(목록 위) · head = 「총 토큰」 줄 안 · side = 목록 위에서 다른 확장 줄과 나란히 · bottom = 목록 맨 밑.
 // 「자동」이면 다른 확장이 우리 줄을 자꾸 치울 때(같은 자리를 서로 차지하려 할 때) 다음 자리로 비켜 감.
 const BAR_SPOTS = ['top', 'head', 'side', 'bottom'];   // side = 다른 확장 줄과 나란히 (예전 'under' 는 side 로)
 const BAR_SPOT_KEY = 'promptFolders.barSpot.v1';
@@ -779,7 +805,6 @@ function placeBar(bar, list) {
     const head = wrap?.querySelector(':scope > .completion_prompt_manager_header');
     const foot = wrap?.querySelector(':scope > .completion_prompt_manager_footer');
     if (spot === 'head' && head) (head.firstElementChild || head).after(bar);
-    else if (spot === 'under' && head) head.after(bar);
     else if (spot === 'bottom') list.after(bar);
     else if (foot) foot.after(bar);
     else list.before(bar);
@@ -833,7 +858,8 @@ function watchBar() {
             barMoves = barMoves.filter(t => now - t < 60000);
             if (settings().barPos === 'auto' && barMoves.length < BAR_SPOTS.length - 1) {
                 barMoves.push(now);
-                const next = BAR_SPOTS[(BAR_SPOTS.indexOf(autoSpot()) + 1) % BAR_SPOTS.length];
+                const cycle = BAR_SPOTS.filter(x => x !== 'side');   // side 는 목록 위와 같은 자리라 비켜 가는 곳이 못 됨
+                const next = cycle[(cycle.indexOf(autoSpot()) + 1) % cycle.length];
                 try { localStorage.setItem(BAR_SPOT_KEY, next); } catch { /* 이번 화면에서만 */ }
                 toastr.info(tr`Another extension kept taking the toolbar's spot, so it moved to: ${spotLabel(next)}`, tr`Prompt Folders`);
             } else {
@@ -960,6 +986,7 @@ function commitToggles(ids = []) {
     mark.remove();
     clearTimeout(tokenTimer);
     tokenTimer = setTimeout(recountTokens, 800);
+    rememberOn();
 }
 
 /** 토큰 수만 다시 세어 숫자만 고침 (생성 중이면 실리태번에 맡김 — 끝난 뒤 알아서 다시 그림) */
@@ -2147,7 +2174,11 @@ function cloneRow(orig) {
 // 그룹(하위 포함) 안에서 토글 하나를 켜면 나머지는 자동으로 끔. 언어·시점처럼 「택1」인 묶음용.
 
 
-function enforceExclusive(before, keepId = null) {
+/** 지금 켜짐 상태를 기억 — 다음에 목록을 다시 그릴 때 「밖에서 새로 켠 것」을 가려내려고 */
+let lastOn = null;
+function rememberOn() { lastOn = { key: presetKey(), map: liveOn() }; }
+
+function enforceExclusive(before, keepId = null, quiet = false) {
     const pm = promptManager;
     if (!pm?.activeCharacter) return 0;
     const data = presetData();
@@ -2158,13 +2189,15 @@ function enforceExclusive(before, keepId = null) {
     const turnedOn = keepId ? [keepId] : order.filter(e => e.enabled && !before.has(e.identifier)).map(e => e.identifier);
     let changed = 0;
     for (const id of turnedOn) {
+        // 한꺼번에 여러 개가 새로 켜졌으면 앞에서 남긴 것을 뒤의 것이 다시 끄지 않게
+        if (!keepId && !order.find(e => e.identifier === id)?.enabled) continue;
         for (const g of ex) {
             const items = new Set(tree.allItems(g));
             if (!items.has(id)) continue;
             for (const e of order) if (e.enabled && e.identifier !== id && items.has(e.identifier)) { e.enabled = false; changed++; }
         }
     }
-    if (changed) commitToggles();
+    if (changed) { if (quiet) { promptManager?.saveServiceSettings(); paintStates(); rememberOn(); } else commitToggles(); }
     return changed;
 }
 
@@ -2237,6 +2270,7 @@ function restoreSnap(snap) {
         pm.removePromptOrderForCharacter(pm.activeCharacter);
         pm.addPromptOrderForCharacter(pm.activeCharacter, snap.order.map(e => ({ ...e })));
         pm.saveServiceSettings();
+        rememberOn();
     }
     settings().presets[snap.key] = { ...(settings().presets[snap.key] || {}), groups: structuredClone(snap.groups) };
     save();
@@ -2269,6 +2303,7 @@ function setAllCollapsed(collapsed) {
 function toggleAll(ids, target) {
     const pm = promptManager;
     if (!pm || !pm.activeCharacter) return;
+    const before = liveOn();
     const counts = pm.tokenHandler?.getCounts?.() ?? {};
     ids.forEach(id => {
         const prompt = pm.getPromptById(id);
@@ -2278,7 +2313,27 @@ function toggleAll(ids, target) {
         entry.enabled = target;
         counts[id] = null;
     });
+    // 바깥 그룹을 통째로 켜면 안의 택1 그룹도 다 켜졌음 → 택1 그룹마다 하나만 (원래 켜져 있던 것, 없으면 실제 순서 첫 번째)
+    if (target) keepOnePerExclusive(new Set(ids), before);
     commitToggles();
+}
+
+/** 택1 그룹에서 켜진 게 여럿이면 하나만 남김 — 바깥 그룹부터(안 그룹은 바깥에서 남긴 것을 따름) */
+function keepOnePerExclusive(touched, before) {
+    const pm = promptManager;
+    const data = presetData(), tree = makeTree(data.groups);
+    const order = pm.getPromptOrderForCharacter(pm.activeCharacter) || [];
+    const depth = g => { let d = 0; for (let p = tree.parentOf(g); p && d < 50; p = tree.parentOf(p)) d++; return d; };
+    let off = 0;
+    for (const g of data.groups.filter(x => x.exclusive).sort((a, b) => depth(a) - depth(b))) {
+        const items = new Set(tree.allItems(g));
+        if (![...items].some(id => touched.has(id))) continue;
+        const on = order.filter(e => e.enabled && items.has(e.identifier));
+        if (on.length < 2) continue;
+        const keep = on.find(e => before.get(e.identifier)) || on[0];
+        on.forEach(e => { if (e !== keep) { e.enabled = false; off++; } });
+    }
+    return off;
 }
 
 function createGroup(parentId = null) {
@@ -3042,7 +3097,8 @@ function init() {
     setupExclusive();
     // 다른 프리셋을 고르면 그 프리셋의 그룹으로 다시 그림
     const { eventSource, event_types } = SillyTavern.getContext();
-    eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, scheduleApply);
+    eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, () => { scheduleApply(); setTimeout(syncToPreset, 500); });
+    pruneSettings();
     observer = new MutationObserver(mutations => {
         // ST가 목록을 다시 그렸거나 줄 순서가 바뀐 경우에만 다시 적용
         // 목록 밖(다른 확장이 목록 위에 붙이는 줄 등)의 변화는 무시 — 서로 다시 그리며 끝없이 도는 것을 막음

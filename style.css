@@ -219,19 +219,6 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-ed-chip:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: 1px; }
 
 /* 자동 그룹 미리보기 */
-.pf-auto-list { list-style: none; margin: 0; padding: 0; max-height: min(55vh, 560px); overflow-y: auto; border: 1px solid var(--pf-line); border-radius: 8px; }
-.pf-auto-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--pf-line); }
-.pf-auto-row:last-child { border-bottom: 0; }
-.pf-auto-row.pf-auto-sub { padding-left: 34px; }
-.pf-auto-row input[type=checkbox] { margin: 0; }
-.pf-auto-row .pf-auto-name { margin: 0; min-width: 0; width: 100%; box-sizing: border-box; font-size: .95em; }
-.pf-auto-row:not(.pf-auto-sub) .pf-auto-name { font-weight: 600; }
-.pf-auto-off .pf-auto-name, .pf-auto-empty .pf-auto-name { opacity: .45; }
-.pf-auto-count { all: unset; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; cursor: pointer; color: var(--pf-muted); font-size: .85em; font-variant-numeric: tabular-nums; }
-.pf-auto-count:hover { color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent); }
-.pf-auto-count i { font-size: .8em; transition: transform .12s; }
-.pf-auto-count[aria-expanded="true"] i { transform: rotate(180deg); }
-.pf-auto-items { grid-column: 2 / -1; margin: 2px 0 4px; padding-left: 18px; font-size: .82em; color: var(--pf-muted); line-height: 1.5; }
 
 
 /* 하나만 켜기 표시 */
@@ -245,17 +232,13 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 #completion_prompt_manager #completion_prompt_manager_list li.pf-clone .drag-handle { display: flex !important; cursor: grab; }
 #completion_prompt_manager #completion_prompt_manager_list li.pf-clone .prompt-manager-inspect-action { cursor: pointer; }
 #completion_prompt_manager #completion_prompt_manager_list .prompt-manager-inspect-action { -webkit-user-drag: none; }
-.pf-ed-row[hidden], .pf-auto-items[hidden] { display: none !important; }
+.pf-ed-row[hidden] { display: none !important; }
 
-.pf-auto-items label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-.pf-auto-items input[type=checkbox] { margin: 0; flex: none; }
-.pf-auto-items label:has(input:not(:checked)) span { text-decoration: line-through; opacity: .55; }
 
 
 .pf-auto-ai { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0 4px; }
 .pf-auto-ai .menu_button { display: inline-flex; align-items: center; gap: 6px; margin: 0; width: auto; padding: 5px 12px; }
 .pf-auto-ai-note { opacity: .65; font-size: .82em; flex: 1 1 180px; }
-.pf-auto-none { list-style: none; padding: 12px 10px; opacity: .75; }
 
 .pf-set-ai { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 .pf-auto-ai .menu_button.pf-busy { opacity: .85; }
