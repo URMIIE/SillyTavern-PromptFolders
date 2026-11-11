@@ -1,9 +1,5 @@
 /* Prompt Folders — 프롬프트 관리자 그룹 */
 
-.pf-hidden { display: none !important; }
-/* 테마가 프롬프트 줄에 ID 선택자 + !important 로 display 를 걸어도 숨긴 원래 줄이 다시 보이지 않게 */
-html body #completion_prompt_manager #completion_prompt_manager_list > li.pf-hidden.pf-hidden.pf-hidden { display: none !important; }
-
 .pf-pos { display: inline-block; min-width: 1.8em; margin-right: 2px; font-size: .75em; opacity: .5; font-variant-numeric: tabular-nums; }
 
 /* ---------- 그룹: 배경·색 띠 없이, 이름 앞 작은 색 점 + 옅은 안내선 ---------- */
@@ -34,6 +30,8 @@ body.pf-dragging, body.pf-dragging * { user-select: none !important; cursor: gra
 
 .pf-group-body { list-style: none; margin: 0 0 4px 8px; padding: 0 0 0 9px; border-left: 1px solid var(--pf-line); }
 .pf-collapsed > .pf-group-body { display: none; }
+/* 접힌 그룹: 줄을 감싼 칸째 숨김 — 테마가 프롬프트 줄에 display 를 !important 로 걸어도 칸이 숨어 있으면 안 보임 */
+html body #completion_prompt_manager #completion_prompt_manager_list li.pf-group.pf-collapsed > ul.pf-group-body { display: none !important; }
 .pf-clone { cursor: default; }
 
 .pf-tag { display: inline-block; margin-left: 8px; font-size: .74em; color: var(--pf-muted); vertical-align: middle; white-space: nowrap; }
@@ -226,7 +224,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-btn-idle { opacity: .45; cursor: default; }
 /* 그룹이 없을 때 안내 */
 
-/* 그룹 안 토글(복사본)에도 끌기 손잡이 보이기 — 실리태번은 끌기 표시가 없는 줄의 손잡이를 숨김 */
+/* 그룹 안 토글에도 끌기 손잡이 보이기 — 실리태번은 끌기 표시가 없는 줄의 손잡이를 숨김 */
 /* 손잡이는 실리태번처럼 줄 왼쪽 칸에 (숫자·이름과 안 겹치게 줄 왼쪽에 자리를 비움) */
 #completion_prompt_manager #completion_prompt_manager_list li.pf-clone { position: relative; padding-left: 26px !important; }
 #completion_prompt_manager #completion_prompt_manager_list li.pf-clone .drag-handle { display: flex !important; cursor: grab; }

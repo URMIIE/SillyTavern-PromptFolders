@@ -240,10 +240,29 @@ function hslHex(h, s, l) {
 
 // ---------------- 렌더링 ----------------
 
+/** 그룹 안으로 옮겨 둔 진짜 줄을 실제 순서대로 목록에 되돌림 — 그룹 칸을 지우면 그 안의 줄도 같이 지워지므로 먼저 */
+function restoreRows(container) {
+    const list = container.querySelector(`#${LIST_ID}`);
+    if (!list?.querySelector(':scope > li.pf-group')) return;
+    const pm = promptManager;
+    const order = pm?.activeCharacter ? (pm.getPromptOrderForCharacter(pm.activeCharacter) || []) : [];
+    const rank = new Map(order.map((e, i) => [e.identifier, i]));
+    const rows = [...list.querySelectorAll(ROW_SEL)];
+    const first = [...list.children].find(el => el.matches(`${ROW_SEL}, li.pf-group`));
+    if (!first) return;
+    const mark = document.createComment('pf');
+    first.before(mark);
+    rows.map((r, i) => ({ r, k: rank.get(r.dataset.pmIdentifier) ?? 1e9 + i }))
+        .sort((a, b) => a.k - b.k)
+        .forEach(({ r }) => mark.before(r));
+    mark.remove();
+}
+
 function cleanup(container) {
+    restoreRows(container);
+    container.querySelectorAll('li.pf-clone').forEach(el => { el.classList.remove('pf-clone'); delete el.dataset.pfId; });
     container.querySelectorAll('.pf-toolbar').forEach(el => ownRemoved.add(el));
     container.querySelectorAll('.pf-toolbar, li.pf-group, li.pf-empty, .pf-pos, .pf-tag, .pf-check').forEach(el => el.remove());
-    container.querySelectorAll('li.pf-hidden').forEach(el => el.classList.remove('pf-hidden'));
     container.querySelectorAll('li.pf-filtered').forEach(el => el.classList.remove('pf-filtered'));
     container.querySelectorAll('li.pf-selectable').forEach(el => el.classList.remove('pf-selectable'));
 }
@@ -330,20 +349,23 @@ function apply() {
         const anchor = document.createElement('li');
         anchor.className = 'pf-anchor';
         if (custom) (rows[0] ?? list.firstChild)?.before?.(anchor);
+        const top = document.createComment('pf');   // 항목이 없는 그룹 자리(목록 맨 위) — rows[0] 은 그룹 안으로 옮겨질 수 있음
+        rows[0].before(top);
         topGroups.forEach(g => {
             const items = tree.allItems(g).filter(id => rowById.has(id)).sort((a, b) => pos.get(a) - pos.get(b));
+            // 그룹 칸 자리는 줄을 옮기기 전에 잡음(첫 항목 바로 앞)
+            const spot = !custom && items.length ? document.createComment('pf') : null;
+            if (spot) rowById.get(items[0]).before(spot);
             const groupLi = buildGroup(g, ctx, 0);
-            if (custom) {
-                anchor.before(groupLi);
-                items.forEach(id => rowById.get(id).classList.add('pf-hidden'));
-            } else if (items.length) {
-                rowById.get(items[0]).before(groupLi);
-                items.forEach(id => rowById.get(id).classList.add('pf-hidden'));
-            } else {
+            // 그룹 칸은 첫 항목 자리에 — buildGroup 이 진짜 줄을 그룹 안으로 옮기므로 자리를 먼저 잡아 둠
+            if (custom) anchor.before(groupLi);
+            else if (spot) spot.replaceWith(groupLi);
+            else {
                 // 이 프리셋에 남은 항목이 없는 그룹은 목록 맨 위에
-                rows[0].before(groupLi);
+                top.before(groupLi);
             }
         });
+        top.remove();
         anchor.remove();
     } finally {
         for (const [el, top] of scrolled) el.scrollTop = top;
@@ -361,12 +383,12 @@ function setSortable(list, enabled) {
 }
 
 // ---------------- 그룹 보기 끌기 (자유 위치) ----------------
-// 그룹 보기에서는 그룹 안 줄이 복사본이고 원본은 숨겨져 있어서, 실리태번 정렬 기능으로는
-// 그룹 사이(그룹이 연달아 있으면 보이는 줄이 없음)나 그룹 안 원하는 순서에 놓을 수가 없었다. 숨긴 원본 위치까지 계산해 렉도 심했다.
+// 그룹 보기에서는 줄이 그룹 칸 안으로 옮겨져 있어 화면 순서가 실제 순서와 다를 수 있고, 실리태번 정렬 기능은 화면 순서를 그대로 저장해서
+// 그룹 사이(그룹이 연달아 있으면 보이는 줄이 없음)나 그룹 안 원하는 순서에 놓을 수가 없었다.
 // → 그룹 보기에서는 실리태번 정렬을 끄고 화면에 보이는 그대로 끄는 기능을 따로 둔다.
 //   줄 위·아래 반쪽: 그 줄 앞·뒤에 놓음(그 줄과 같은 그룹이 됨) / 그룹 머리 위쪽: 그룹 앞(그룹 밖) / 그룹 머리 아래쪽: 그룹 안(펼쳐져 있으면 맨 앞, 접혀 있으면 맨 뒤).
 //   놓으면 프롬프트 관리자 순서(prompt_order)를 직접 고쳐 저장하고 다시 그린다. 원래 순서 보기에서는 실리태번 정렬을 그대로 쓴다.
-const ROW_VISIBLE = `${ROW_SEL}:not(.pf-hidden), li.pf-clone[data-pf-id]`;
+const ROW_VISIBLE = ROW_SEL;
 // 이름(누르면 내용 보기)도 잡고 끌 수 있음 — 6px 넘게 움직여야 끌기라서 그냥 누르면 원래대로 내용 보기
 const NO_DRAG = '.prompt-manager-toggle-action, .prompt-manager-edit-action, .prompt-manager-detach-action, input, select, textarea, a:not(.prompt-manager-inspect-action), .pf-btn';
 let drag = null;          // { id, startX, startY, started, ghost, line, target, pointerId }
@@ -711,7 +733,7 @@ function stepGroup(g, dir) {
     }
     const li = document.querySelector(`#${LIST_ID} li.pf-group[data-pf-group="${CSS.escape(g.id)}"]`);
     if (!li) return;
-    const visible = el => el && (el.matches('li.pf-group, li.pf-clone') || (el.matches(ROW_SEL) && !el.classList.contains('pf-hidden') && !el.classList.contains('pf-filtered')));
+    const visible = el => el && (el.matches('li.pf-group, li.pf-clone') || (el.matches(ROW_SEL) && !el.classList.contains('pf-filtered')));
     let sib = dir < 0 ? li.previousElementSibling : li.nextElementSibling;
     while (sib && !visible(sib)) sib = dir < 0 ? sib.previousElementSibling : sib.nextElementSibling;
     if (!sib) return void toastr.info(dir < 0 ? tr`Already at the top.` : tr`Already at the bottom.`, tr`Prompt Folders`);
@@ -945,12 +967,12 @@ function paintHead(head, g, items, rowById, pos, tree) {
     }
 }
 
-/** 줄(원래 줄 · 그룹 안 복사본)과 그룹 머리를 지금 켬/끔 상태로 — 목록을 다시 그리지 않음 */
+/** 줄과 그룹 머리를 지금 켬/끔 상태로 — 목록을 다시 그리지 않음 */
 function paintStates() {
     const list = document.getElementById(LIST_ID);
     if (!list || !promptManager?.activeCharacter) return;
     const on = liveOn();
-    list.querySelectorAll(`${ROW_SEL}, li.pf-clone[data-pf-id]`).forEach(row => {
+    list.querySelectorAll(`${ROW_SEL}`).forEach(row => {
         const id = row.dataset.pmIdentifier || row.dataset.pfId;
         if (!on.has(id)) return;
         const v = on.get(id);
@@ -962,7 +984,8 @@ function paintStates() {
     if (!heads.length) return;
     const rows = [...list.querySelectorAll(ROW_SEL)];
     const rowById = new Map(rows.map(r => [r.dataset.pmIdentifier, r]));
-    const pos = new Map(rows.map((r, i) => [r.dataset.pmIdentifier, i + 1]));
+    // 실제 자리는 실리태번 순서로 — 줄이 그룹 칸 안으로 옮겨져 있어 화면 순서는 실제 순서와 다를 수 있음
+    const pos = new Map((promptManager.getPromptOrderForCharacter(promptManager.activeCharacter) || []).filter(e => rowById.has(e.identifier)).map((e, i) => [e.identifier, i + 1]));
     const groups = presetData().groups, tree = makeTree(groups);
     heads.forEach(head => {
         const g = groups.find(x => x.id === head.parentElement.dataset.pfGroup);
@@ -999,7 +1022,7 @@ async function recountTokens() {
     const list = document.getElementById(LIST_ID);
     if (!list) return;
     const counts = pm.tokenHandler?.getCounts?.() || {};
-    list.querySelectorAll(`${ROW_SEL}, li.pf-clone[data-pf-id]`).forEach(row => {
+    list.querySelectorAll(`${ROW_SEL}`).forEach(row => {
         const id = row.dataset.pmIdentifier || row.dataset.pfId;
         const el = row.querySelector('.prompt_manager_prompt_tokens');
         if (!el) return;
@@ -1077,7 +1100,7 @@ function buildGroup(g, ctx, depth) {
     {
         // 직접 넣은 항목과 하위 그룹을 실제 위치 순서대로 (접힌 그룹도 그려 두고 CSS 로 숨김 — 검색이 다시 그리지 않고 펼칠 수 있게)
         const entries = [];
-        g.members.filter(id => rowById.has(id)).forEach(id => entries.push({ at: pos.get(id), el: () => cloneRow(rowById.get(id)) }));
+        g.members.filter(id => rowById.has(id)).forEach(id => entries.push({ at: pos.get(id), el: () => takeRow(rowById.get(id)) }));
         tree.childrenOf(g).forEach((c, ci0) => {
             const ci = tree.allItems(c).filter(id => rowById.has(id)).map(id => pos.get(id));
             const at = isCustomLayout() ? -100000 + ci0 : (ci.length ? Math.min(...ci) : Infinity);
@@ -2143,29 +2166,12 @@ function pickColor(g, anchor) {
     placeMenu(menu, anchor);
 }
 
-/** 원래 줄을 복사해서 그룹 안에 보여준다. 복사본은 실리태번 정렬 대상이 아니고(그룹 보기 끌기로 옮김),
- *  버튼을 누르면 숨겨진 원래 줄의 버튼을 대신 눌러준다. */
-function cloneRow(orig) {
-    const clone = orig.cloneNode(true);
-    const id = orig.dataset.pmIdentifier;
-    clone.classList.remove(DRAG_CLASS, 'pf-hidden');
-    clone.classList.add('pf-clone');
-    clone.removeAttribute('data-pm-identifier');
-    clone.removeAttribute('id');
-    clone.dataset.pfId = id;
-
-    const proxy = sel => {
-        clone.querySelectorAll(sel).forEach(el => el.addEventListener('click', e => {
-            e.preventDefault();
-            e.stopPropagation();
-            orig.querySelector(sel)?.click();
-        }));
-    };
-    proxy('.prompt-manager-toggle-action');
-    proxy('.prompt-manager-edit-action');
-    proxy('.prompt-manager-inspect-action');
-    proxy('.prompt-manager-detach-action');
-    return clone;
+/** 진짜 줄을 그룹 안으로 옮김 — 복사본을 두면 숨긴 원래 줄을 테마가 다시 보이게 할 때 목록이 두 번 나오고,
+ *  다른 확장이 줄에 붙인 표시 · 단추도 복사본엔 없었음. 실제 순서(prompt_order)는 그대로, 화면 배치만 바뀜(restoreRows 가 되돌림) */
+function takeRow(row) {
+    row.classList.add('pf-clone');
+    row.dataset.pfId = row.dataset.pmIdentifier;
+    return row;
 }
 
 // ---------------- 동작 ----------------
@@ -2204,7 +2210,7 @@ function enforceExclusive(before, keepId = null, quiet = false) {
 function setupExclusive() {
     if (window.__pfExclusiveHooked) return;
     window.__pfExclusiveHooked = true;
-    // 프롬프트 목록의 토글 단추(원래 줄 · 그룹 안 복사본): 실리태번 처리(토큰 세기 → 목록 전체 다시 그리기)를 거치지 않고 바로 바꿈
+    // 프롬프트 목록의 토글 단추(그룹 안으로 옮긴 줄 포함): 실리태번 처리(토큰 세기 → 목록 전체 다시 그리기)를 거치지 않고 바로 바꿈
     document.addEventListener('click', e => {
         const btn = e.target.closest?.('.prompt-manager-toggle-action');
         if (!btn || !btn.closest(`#${LIST_ID}`)) return;
@@ -3001,8 +3007,8 @@ function syncRowMetrics() {
         }).observe(list);
     }
     const heights = [];
-    // 그룹 안 줄은 원래 줄의 복사본(pf-clone)이라 data-pm-identifier 가 없음 — 보이는 프롬프트 줄이면 다 잼
-    for (const row of list.querySelectorAll('li.completion_prompt_manager_prompt:not(.completion_prompt_manager_list_head):not(.pf-hidden)')) {
+    for (const row of list.querySelectorAll('li.completion_prompt_manager_prompt:not(.completion_prompt_manager_list_head)')) {
+        if (!row.offsetParent) continue;   // 접힌 그룹 안 줄
         let h = row.offsetHeight;
         // 이름이 좁은 칸에서 두 줄로 꺾인 줄은 한 줄짜리 높이로 바꿔 잼(폰에서 모든 줄이 꺾이면 그룹 머리가 두 줄 높이가 되던 것)
         const name = row.querySelector('.completion_prompt_manager_prompt_name');
@@ -3023,7 +3029,7 @@ function syncRowMetrics() {
 // 테마가 프롬프트 줄을 상자(테두리 · 바탕 · 둥근 모서리)로 그리면 그룹 머리도 같은 상자로 — 안쪽 줄만 테마를 따르고 그룹 머리는 맨글로 보였음
 function syncRowLook(list) {
     // 켜진 줄만 칠하는 테마(켜짐 표시)도 있어서, 켜진 줄 · 꺼진 줄에 같이 있는 모양만 따름 — 그룹 머리가 「켜진 토글」처럼 보이지 않게
-    // 보이는 줄이 없으면(그룹이 다 접힘) 숨겨 둔 원래 줄로 — 숨겨져 있어도 테마 색 · 테두리 값은 같음
+    // 보이는 줄이 없으면(그룹이 다 접힘) 접힌 그룹 안 줄로 — 숨겨져 있어도 테마 색 · 테두리 값은 같음
     const pick = (q) => {
         // 마우스가 올라간 줄은 「올림」 색이라 빼고 잼
         const rows = [...list.querySelectorAll('li.completion_prompt_manager_prompt:not(.completion_prompt_manager_list_head)' + q)].filter(e => !e.matches(':hover, :focus-within'));
