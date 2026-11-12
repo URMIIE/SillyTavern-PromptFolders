@@ -54,7 +54,8 @@ function presetData() {
     // (비어 있는 항목이 남아 있으면 같은 이름의 새 판 파일에 든 그룹을 못 읽었음)
     if (!s.presets[k]?.groups?.length) {
         const shared = readPresetGroups();
-        s.presets[k] = { ...(s.presets[k] || {}), groups: shared?.length ? structuredClone(shared) : [] };
+        // 항목을 새 객체로 바꿔 끼우지 않음 — 편집기가 열린 동안 다시 불리면 편집기가 쥔 옛 객체가 설정에서 떨어져 만든 그룹이 저장되지 않았음
+        (s.presets[k] ||= {}).groups = shared?.length ? structuredClone(shared) : [];
     }
     applyFolds(k, s.presets[k]);
     return s.presets[k];
