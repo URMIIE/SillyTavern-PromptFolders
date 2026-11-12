@@ -211,5 +211,6 @@
     "Also the names of your ${0} groups, each with up to 3 of its toggle names, so toggles can go into them.": "지금 그룹 ${0}개의 이름과 그룹마다 토글 이름 3개까지도 보내요(기존 그룹에 넣을 수 있게).",
     "A group made this time": "이번에 새로 만드는 그룹",
     "the names of ${0} toggles and their order.": "토글 ${0}개의 이름과 순서.",
-    "Edit this group": "이 그룹 편집"
+    "Edit this group": "이 그룹 편집",
+    "All toggles · pick 1": "빠짐없이 · 택1 자동"
 }

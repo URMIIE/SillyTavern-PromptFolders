@@ -1714,6 +1714,15 @@ Names may be decorated with symbols; markers like ⤵/⤴, start/end, <tag>/</ta
 - Prefer neighbouring toggles; each index at most once; toggles that fit nowhere can stay out.
 - At most two levels: 4 to 12 top-level groups, and inside a top-level group put children (sub-folders, at least 2 items each) when it holds two or more distinct sets — e.g. a style category with separate "pick one" sets.
 - name: short Korean (2–12 characters) starting with one fitting emoji, e.g. "🌐 언어", "🎬 문체".`;
+// 두 번째 기본 지시문: 토글을 빠짐없이 넣고 · 소그룹이 있는 그룹엔 토글을 따로 두지 않고 · 택1 묶음을 AI 가 표시("pick")
+const AI_GROUP_RULES_COMPLETE = `You organise the prompt toggles of a SillyTavern preset into folders so a user can find them quickly.
+Names may be decorated with symbols; markers like ⤵/⤴, start/end, <tag>/</tag> or blank names often open and close sections.
+- Follow the preset's own sections when it has them; otherwise group by purpose (language, POV, style, pacing, NSFW, trackers, reasoning, jailbreak/system, etc.).
+- Every toggle goes into a group — leave none out, each index exactly once. Prefer neighbouring toggles. Keep a section's opening and closing marker in that section's group.
+- At most two levels: 4 to 12 top-level groups. Give a top-level group children (sub-folders, at least 2 items each) when it holds two or more distinct sets.
+- A group with children holds no toggles of its own: its "items" stays empty and every one of its toggles goes into one of its children (a leftover toggle joins the closest child or gets its own child).
+- Set "pick": true on a group or child whose toggles are alternatives where only one should be on at a time (language, POV, tense, response length, one style out of several, model-specific variants). Leave it out when the toggles are meant to be combined.
+- name: short Korean (2–12 characters) starting with one fitting emoji — top-level groups and children alike, e.g. "🌐 언어", "🎬 문체".`;
 const TRANS_FORMAT = 'Reply with exactly one line per label in the form "number | translated label" and nothing else.';
 const TRANS_RULES = 'Translate each group label into short, natural Korean, as a Korean user would name a folder of prompt toggles. Keep emoji, symbols and Latin words as they are.';
 // 지시문 묶음: settings.promptSets = [{ id, name, group, trans }], settings.promptSet = 고른 묶음 id ('' = 기본)
@@ -1730,7 +1739,9 @@ function promptSets() {
     }
     return s.promptSets;
 }
-const activeSet = () => promptSets().find(x => x.id === settings().promptSet) || null;
+// 기본으로 들어 있는 지시문 묶음(읽기만) — subEmoji: 소그룹 이름의 앞 이모지를 남김
+const BUILTIN_SETS = [{ id: 'builtin-complete', name: 'All toggles · pick 1', group: AI_GROUP_RULES_COMPLETE, trans: TRANS_RULES, subEmoji: true, builtin: true }];
+const activeSet = () => BUILTIN_SETS.find(x => x.id === settings().promptSet) || promptSets().find(x => x.id === settings().promptSet) || null;
 const groupPrompt = () => `${String(activeSet()?.group || '').trim() || AI_GROUP_RULES}\n\n${AI_GROUP_FORMAT}`;
 const transPrompt = () => `${String(activeSet()?.trans || '').trim() || TRANS_RULES}\n${TRANS_FORMAT}`;
 
@@ -1770,6 +1781,34 @@ function loadCache(key) {
     try { const v = JSON.parse(localStorage.getItem(`pf-ai-models:${key}`) || 'null'); if (v?.ids && Date.now() - v.at < 864e5) { modelCache.set(key, v); return v; } } catch { /* 없음 */ }
     return null;
 }
+// 다른 확장이 받아 둔 모델 목록(이 브라우저 localStorage, { 키: { at, ids } }, 키 = 공급자 · 'custom:<주소>') — 거기서 불러온 목록도 여기 뜨게
+const SHARED_MODEL_STORES = ['lt_live_models_v1', 'bl_live_models_v1'];
+function sharedModels(source) {
+    const key = source === 'custom' ? `custom:${customUrlOf().replace(/\/+$/, '')}` : source;
+    let best = null;
+    for (const name of SHARED_MODEL_STORES) {
+        try {
+            const e = JSON.parse(localStorage.getItem(name) || 'null')?.[key];
+            const ids = Array.isArray(e?.ids) ? e.ids.filter(x => typeof x === 'string' && x) : [];
+            if (ids.length && (!best || (Number(e.at) || 0) > best.at)) best = { ids, at: Number(e.at) || 0 };
+        } catch { /* 깨진 값은 건너뜀 */ }
+    }
+    return best;
+}
+/** 받아 둔 목록 중 가장 최근 것(이 확장 · 다른 확장). Vertex 는 목록을 주는 곳이 없어 아래 이름표(KNOWN_MODELS)를 씀 —
+ *  다른 공급자의 목록을 빌려 오면 Vertex 에 없는 모델 · 받아쓰기 같은 채팅용이 아닌 모델이 섞였음 */
+function knownList(source) {
+    if (!LISTABLE.has(source)) return null;
+    const own = loadCache(cacheKeyOf(source)), other = sharedModels(source);
+    return [own, other].filter(x => x?.ids?.length).sort((a, b) => (b.at || 0) - (a.at || 0))[0] || null;
+}
+/** 사용자가 다른 확장의 「모델 등록」으로 직접 넣은 모델 — 공급자가 목록을 안 주거나 아직 목록에 없는 모델(새 모델 · 미리 보기)이라 받은 목록 앞에 붙임 */
+function registeredModels(source) {
+    const ext = SillyTavern.getContext().extensionSettings || {};
+    const a = ext.model_register?.sources?.[source];
+    const b = ext.customModels?.provider?.[source === 'makersuite' ? 'google' : source];
+    return [...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])].map(x => String(x ?? '').trim()).filter(Boolean);
+}
 /** 실리태번 서버에 그 공급자의 모델 목록을 물음 (/status — 키는 서버가 붙임) */
 async function fetchModels(source) {
     const key = cacheKeyOf(source);
@@ -1796,11 +1835,11 @@ async function fetchModels(source) {
 function aiModelsOf(source) {
     const o = SillyTavern.getContext().chatCompletionSettings || {};
     const current = String(o[MODEL_KEY[source]] || '').trim();
-    const got = loadCache(cacheKeyOf(source));
+    const got = knownList(source);
     if (!got && LISTABLE.has(source) && !(Date.now() - (failedAt.get(cacheKeyOf(source)) || 0) < 6e5)) fetchModels(source);
     const sel = document.getElementById(`model_${source === 'makersuite' ? 'google' : source}_select`);
     const page = sel ? [...sel.options].map(x => x.value).filter(v => v && !/^(custom|OR_Website)$/.test(v)) : [];
-    const list = got?.ids?.length ? got.ids : [...(KNOWN_MODELS[source] || []), ...page];
+    const list = [...registeredModels(source), ...(got?.ids?.length ? got.ids : [...(KNOWN_MODELS[source] || []), ...page])];
     return { list: [...new Set(list)], current, loading: fetching.has(cacheKeyOf(source)) };
 }
 
@@ -2004,10 +2043,10 @@ async function aiPlan(order, getPrompt, signal, existing = null) {
     const take = items => (Array.isArray(items) ? items : []).map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < ids.length && !used.has(i) && used.add(i)).map(i => ids[i]);
     const plan = [];
     for (const g of Array.isArray(rows) ? rows : []) {
-        const children = (Array.isArray(g?.children) ? g.children : []).map(k => ({ name: String(k?.name || '').trim().slice(0, 40), members: take(k?.items) })).filter(k => k.members.length >= 2);
+        const children = (Array.isArray(g?.children) ? g.children : []).map(k => ({ name: String(k?.name || '').trim().slice(0, 40), members: take(k?.items), ...(k?.pick === true ? { exclusive: true } : {}) })).filter(k => k.members.length >= 2);
         const members = take(g?.items);
         if (members.length + children.reduce((n, k) => n + k.members.length, 0) < 2) continue;
-        plan.push({ name: String(g?.name || '').trim().slice(0, 40), members, children });
+        plan.push({ name: String(g?.name || '').trim().slice(0, 40), members, children, ...(g?.pick === true ? { exclusive: true } : {}) });
     }
     const at = new Map(ids.map((id, i) => [id, i]));
     const first = n => Math.min(...[...n.members, ...n.children.flatMap(k => k.members)].map(id => at.get(id)));
@@ -2393,7 +2432,7 @@ function planToDraft(plan, mode, existing, nameOf, { order = [], dividers, aiInt
         }
         [...topMembers, ...kidIds].forEach(id => taken.add(id));
         const top = { id: newId(), name: '', members: topMembers, parent: null, collapsed: true, ...(n.exclusive ? { exclusive: true } : {}) };
-        const kids = kidsIn.map(k => ({ id: newId(), name: plainName(nameFor(k.c, k.members)), members: k.members, parent: top.id, collapsed: true, ...(k.c.exclusive ? { exclusive: true } : {}) }));   // 2단계 폴더 이름엔 앞 이모지 없이
+        const kids = kidsIn.map(k => ({ id: newId(), name: activeSet()?.subEmoji ? nameFor(k.c, k.members) : plainName(nameFor(k.c, k.members)), members: k.members, parent: top.id, collapsed: true, ...(k.c.exclusive ? { exclusive: true } : {}) }));   // 2단계 폴더 이름엔 앞 이모지 없이(지시문 묶음이 남기라고 한 때 빼고)
         top.name = nameFor(n, top.members.length ? top.members : kids[0].members);
         base.push(top, ...kids);
     }
@@ -3150,21 +3189,23 @@ function bindPromptSets() {
     const paint = () => {
         const sets = promptSets(), cur = activeSet();
         pills.innerHTML = `<button type="button" class="pf-ed-chip" role="radio" data-set="" aria-checked="${!cur}">${e(tr`Default`)}</button>`
+            + BUILTIN_SETS.map(x => `<button type="button" class="pf-ed-chip" role="radio" data-set="${e(x.id)}" aria-checked="${cur?.id === x.id}">${e(tr([x.name]))}</button>`).join('')
             + sets.map(x => `<button type="button" class="pf-ed-chip" role="radio" data-set="${e(x.id)}" aria-checked="${cur?.id === x.id}">${e(x.name || tr`(no name)`)}</button>`).join('')
             + `<button type="button" class="pf-ps-add" title="${e(tr`Save the instructions below as a new set`)}"><i class="fa-solid fa-plus"></i> ${e(tr`New set`)}</button>`;
-        box.classList.toggle('pf-ps-default', !cur);
-        nameIn.value = cur?.name || '';
+        const fixed = !cur || !!cur.builtin;   // 기본 · 기본으로 들어 있는 묶음은 읽기만(「새 묶음」으로 복사해 고침)
+        box.classList.toggle('pf-ps-default', fixed);
+        nameIn.value = fixed ? '' : (cur.name || '');
         ga.value = cur ? (cur.group || AI_GROUP_RULES) : AI_GROUP_RULES;
         tr2.value = cur ? (cur.trans || TRANS_RULES) : TRANS_RULES;
-        ga.readOnly = tr2.readOnly = !cur;
-        nameIn.closest('.pf-ps-namerow').hidden = !cur;
+        ga.readOnly = tr2.readOnly = fixed;
+        nameIn.closest('.pf-ps-namerow').hidden = fixed;
     };
     pills.addEventListener('click', ev => {
         const b = ev.target.closest('button');
         if (!b) return;
         if (b.classList.contains('pf-ps-add')) {
             const sets = promptSets();
-            const x = { id: newId(), name: tr`Instructions ${sets.length + 1}`, group: ga.value.trim() || AI_GROUP_RULES, trans: tr2.value.trim() || TRANS_RULES };
+            const x = { id: newId(), name: tr`Instructions ${sets.length + 1}`, group: ga.value.trim() || AI_GROUP_RULES, trans: tr2.value.trim() || TRANS_RULES, ...(activeSet()?.subEmoji ? { subEmoji: true } : {}) };
             sets.push(x);
             settings().promptSet = x.id;
         } else settings().promptSet = b.dataset.set || '';
@@ -3172,16 +3213,16 @@ function bindPromptSets() {
         paint();
         if (b.classList.contains('pf-ps-add')) nameIn.select();
     });
-    nameIn.addEventListener('input', () => { const cur = activeSet(); if (!cur) return; cur.name = nameIn.value; saveSettingsDebounced(); pills.querySelector(`[data-set="${CSS.escape(cur.id)}"]`).textContent = cur.name || tr`(no name)`; });
-    ga.addEventListener('input', () => { const cur = activeSet(); if (cur) { cur.group = ga.value; saveSettingsDebounced(); } });
-    tr2.addEventListener('input', () => { const cur = activeSet(); if (cur) { cur.trans = tr2.value; saveSettingsDebounced(); } });
+    nameIn.addEventListener('input', () => { const cur = activeSet(); if (!cur || cur.builtin) return; cur.name = nameIn.value; saveSettingsDebounced(); pills.querySelector(`[data-set="${CSS.escape(cur.id)}"]`).textContent = cur.name || tr`(no name)`; });
+    ga.addEventListener('input', () => { const cur = activeSet(); if (cur && !cur.builtin) { cur.group = ga.value; saveSettingsDebounced(); } });
+    tr2.addEventListener('input', () => { const cur = activeSet(); if (cur && !cur.builtin) { cur.trans = tr2.value; saveSettingsDebounced(); } });
     box.querySelectorAll('[data-pf-reset]').forEach(b => b.addEventListener('click', () => {
-        const cur = activeSet(); if (!cur) return;
+        const cur = activeSet(); if (!cur || cur.builtin) return;
         if (b.dataset.pfReset === 'pf_aiGroupRules') { cur.group = AI_GROUP_RULES; ga.value = AI_GROUP_RULES; } else { cur.trans = TRANS_RULES; tr2.value = TRANS_RULES; }
         saveSettingsDebounced();
     }));
     del.addEventListener('click', async () => {
-        const cur = activeSet(); if (!cur) return;
+        const cur = activeSet(); if (!cur || cur.builtin) return;
         if (!(await callGenericPopup(escapeHtml(tr`Delete the instruction set "${cur.name || tr`(no name)`}"?`), POPUP_TYPE.CONFIRM))) return;
         settings().promptSets = promptSets().filter(x => x !== cur);
         settings().promptSet = '';
