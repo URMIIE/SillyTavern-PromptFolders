@@ -31,8 +31,12 @@ async function loadKo() {
     try { KO = await (await fetch(new URL('i18n/ko-kr.json', import.meta.url))).json(); } catch { KO = {}; }
 }
 /** 영어 원문 키 → 한국어 (사전에 없으면 원문) */
+// 템플릿 글은 부른 자리마다 같은 배열이라, 값이 다 있을 때의 열쇠를 기억해 둠(토글 · 그룹 머리를 그릴 때마다 수백 번 불림)
+const trKeys = new WeakMap();
 function tr(strings, ...values) {
+    if (values.every(v => v !== undefined) && trKeys.has(strings)) return (KO[trKeys.get(strings)] ?? trKeys.get(strings)).replace(/\$\{(\d+)\}/g, (m, i) => values[i]);
     const key = strings.reduce((r, s, i) => r + s + (values[i] !== undefined ? `\${${i}}` : ''), '');
+    if (Array.isArray(strings) && Object.isFrozen(strings) && values.every(v => v !== undefined)) trKeys.set(strings, key);
     return (KO[key] ?? key).replace(/\$\{(\d+)\}/g, (m, i) => values[i]);
 }
 
@@ -47,6 +51,27 @@ function presetKey() {
     return oai_settings?.preset_settings_openai || 'Default';
 }
 
+// 「그룹을 프리셋 파일에도 저장」이 켜져 있으면 그룹은 프리셋 파일에만 두고 settings.json 에는 쓰지 않음 —
+// 같은 그룹을 두 곳에 두면 서로 어긋나는 일이 생기고, settings 를 저장할 때마다(테마 · 토글) 그 사본까지 통째로 보냈음.
+// 메모리에선 settings().presets 를 그대로 쓰되, 파일과 같은 항목은 「안 보이는 칸」(enumerable: false)으로 둬서 JSON 저장에서 빠지게 함
+function setPersist(k, keep) {
+    const s = settings().presets;
+    const d = Object.getOwnPropertyDescriptor(s, k);
+    if (!d || d.enumerable === keep) return;
+    Object.defineProperty(s, k, { value: d.value, writable: true, configurable: true, enumerable: keep });
+}
+const presetKeys = () => Object.getOwnPropertyNames(settings().presets);
+const withoutFolds = groups => JSON.stringify((groups || []).map(({ collapsed, ...g }) => g));
+// 프리셋 이름 → 프리셋(실리태번 목록) — 이름마다 getCompletionPresetByName 을 부르면 그때마다 목록을 다시 훑어서, 프리셋이 많으면 켤 때 수십 ms
+function presetIndex() {
+    try {
+        const { presets, preset_names } = getPresetManager('openai')?.getPresetList() || {};
+        const at = Array.isArray(preset_names) ? preset_names.map((n, i) => [n, i]) : Object.entries(preset_names || {});
+        return new Map(at.map(([n, i]) => [n, presets?.[i]]));
+    } catch { return new Map(); }
+}
+const fileGroups = (name, index = null) => { try { return (index ? index.get(name) : getPresetManager('openai')?.getCompletionPresetByName?.(name))?.extensions?.[KEY]?.groups ?? null; } catch { return null; } };
+
 function presetData() {
     const s = settings();
     const k = presetKey();
@@ -55,7 +80,9 @@ function presetData() {
     if (!s.presets[k]?.groups?.length) {
         const shared = readPresetGroups();
         // 항목을 새 객체로 바꿔 끼우지 않음 — 편집기가 열린 동안 다시 불리면 편집기가 쥔 옛 객체가 설정에서 떨어져 만든 그룹이 저장되지 않았음
+        const fresh = !Object.getOwnPropertyDescriptor(s.presets, k);
         (s.presets[k] ||= {}).groups = shared?.length ? structuredClone(shared) : [];
+        if (fresh && s.syncPreset) setPersist(k, false);   // 파일에서 읽은 것 — settings 에 다시 쓰지 않음
     }
     applyFolds(k, s.presets[k]);
     return s.presets[k];
@@ -93,10 +120,13 @@ function pruneSettings() {
     let names = null;
     try { const n = getPresetManager('openai')?.getPresetList()?.preset_names; names = n ? new Set((Array.isArray(n) ? n : Object.keys(n)).map(x => String(x).normalize('NFC'))) : null; } catch { names = null; }
     let removed = 0;
+    const index = s.syncPreset ? presetIndex() : null;
     for (const [k, v] of Object.entries(s.presets || {})) {
         const empty = !v?.groups?.length;
         const gone = !!names?.size && s.syncPreset && !names.has(k.normalize('NFC'));
-        if (empty || gone) { delete s.presets[k]; removed++; }
+        if (empty || gone) { delete s.presets[k]; removed++; continue; }
+        // 파일에 같은 그룹이 있으면 settings 사본은 빼고 메모리에만 (접힘 상태는 브라우저 저장소에 따로 있어 견주지 않음)
+        if (s.syncPreset && withoutFolds(fileGroups(k, index)) === withoutFolds(v.groups)) { setPersist(k, false); removed++; }
     }
     if (removed) saveSettingsDebounced();
 }
@@ -141,15 +171,17 @@ function syncToPreset() {
             // 지금 프리셋이면 readPresetExtensionField 는 메모리 쪽(설정)을 읽어서, 파일이 밖에서 바뀌어도 「같다」고 넘어갔음 → 파일 쪽 사본과 비교
             const inFile = pm?.getCompletionPresetByName?.(name)?.extensions?.[KEY]?.groups ?? null;
             const inMemory = pm?.readPresetExtensionField({ name, path: KEY })?.groups ?? null;
-            if (JSON.stringify(inFile) === JSON.stringify(groups) && JSON.stringify(inMemory) === JSON.stringify(groups)) return;
-            await pm?.writePresetExtensionField({ name, path: KEY, value: { version: 1, groups } });
+            if (!(JSON.stringify(inFile) === JSON.stringify(groups) && JSON.stringify(inMemory) === JSON.stringify(groups))) await pm?.writePresetExtensionField({ name, path: KEY, value: { version: 1, groups } });
+            // 파일에 들어갔으면 settings 사본은 뺌
+            if (withoutFolds(fileGroups(name)) === withoutFolds(groups)) { setPersist(name, false); saveSettingsDebounced(); }
         } catch (err) {
-            console.warn('[Prompt Folders] preset sync failed', err);
+            console.warn('[Prompt Folders] preset sync failed', err);   // 실패하면 settings 에 남겨 둔 그대로
         }
     }, 1500);
 }
 
 function save() {
+    setPersist(presetKey(), true);   // 파일에 다 쓸 때까지는 settings 에도 (그 사이 창을 닫아도 안 잃게)
     saveSettingsDebounced();
     syncToPreset();
 }
@@ -833,7 +865,12 @@ function placeBar(bar, list) {
     else list.before(bar);
     sideBySide(bar);
     // 처음엔 칸이 닫혀 있어 잴 수 없으니 크기가 바뀔 때(칸을 열 때 · 폭이 바뀔 때) 다시
-    if (spot === 'side' && !bar._pfRo) { bar._pfRo = new ResizeObserver(() => sideBySide(bar)); bar._pfRo.observe(bar); }
+    // 잰 값은 우리 줄의 폭 · 단추 폭으로만 정해짐 → 우리 줄 폭이 바뀔 때만 다시(처음 붙일 때 오는 신호는 폭만 적어 둠)
+    if (spot === 'side' && !bar._pfRo) {
+        let lastW = null;
+        bar._pfRo = new ResizeObserver(([e]) => { const w = Math.round(e.contentRect.width); if (lastW !== null && w !== lastW) sideBySide(bar, true); lastW = w; });
+        bar._pfRo.observe(bar);
+    }
     watchBar();
 }
 /**
@@ -841,9 +878,18 @@ function placeBar(bar, list) {
  * 우리 줄은 오른쪽에 그대로 두고 그 줄을 왼쪽 빈자리로 끌어올려 한 줄처럼 보이게 함 — 자리(DOM)는 안 바꿈.
  * 그 줄이 남은 폭보다 넓으면 그 안에서 줄바꿈되고, 아주 좁으면(120px 아래) 원래대로 위아래.
  */
-function sideBySide(bar) {
+// 마지막으로 잰 이웃 줄 — 이웃이 그대로면(목록을 다시 그리거나 그룹을 접었을 뿐) 다시 재지 않음.
+// 자리 재기는 화면 배치를 강제로 다시 계산해서, 목록이 바뀔 때마다 재면 다시 그리기 한 번에 수십 ms 였음. 크기가 바뀌면 ResizeObserver 가 force 로 부름
+let sideLast = null;
+function sideBySide(bar, force = false) {
     if (!bar?.isConnected) return;
     const next = bar.nextElementSibling, wrap = bar.parentElement;
+    // 도구 줄은 다시 그릴 때마다 새로 만들어지므로 견주는 건 자리(부모 · 이웃 · 자리 설정)만, 잰 결과(side)는 새 줄에 그대로 입힘
+    if (!force && sideLast && sideLast.wrap === wrap && sideLast.next === next && sideLast.spot === bar.classList.contains('pf-bar-sidespot')) {
+        if (bar.classList.contains('pf-bar-side') !== sideLast.side) bar.classList.toggle('pf-bar-side', sideLast.side);
+        return;
+    }
+    sideLast = { wrap, next, spot: bar.classList.contains('pf-bar-sidespot'), side: false };
     const foreign = bar.classList.contains('pf-bar-sidespot') && !!next && next.id !== LIST_ID && !next.classList.contains('completion_prompt_manager_footer') && !next.classList.contains('pf-toolbar') && !next.classList.contains('pf-group');
     let side = false;
     if (foreign) {
@@ -859,6 +905,7 @@ function sideBySide(bar) {
             }
         }
     }
+    sideLast.side = side;
     if (bar.classList.contains('pf-bar-side') !== side) bar.classList.toggle('pf-bar-side', side);
 }
 /** 다른 확장이 우리 도구 줄을 치우면 다시 놓음 — 3초 안에 3번째면 다툼으로 보고 (자동일 때) 다음 자리로 */
@@ -997,7 +1044,7 @@ function paintStates() {
     });
 }
 
-let tokenTimer = null;
+let tokenTimer = null, tokenIdle = 0;
 /** 켬/끔을 바꾼 뒤: 화면은 바로, 저장은 실리태번 함수로(설정 저장 이벤트를 다른 확장도 받음), 토큰 수는 조금 뒤 한 번 */
 function commitToggles(ids = []) {
     const counts = promptManager?.tokenHandler?.getCounts?.();
@@ -1009,8 +1056,9 @@ function commitToggles(ids = []) {
     const mark = document.createComment('pf');
     document.getElementById(CONTAINER_ID)?.append(mark);
     mark.remove();
-    clearTimeout(tokenTimer);
-    tokenTimer = setTimeout(recountTokens, 800);
+    clearTimeout(tokenTimer); if (tokenIdle) window.cancelIdleCallback?.(tokenIdle);
+    // 토큰 세기는 실리태번 시험 생성을 통째로 돌려(긴 채팅이면 0.5초 넘게 멈춤) — 누르기를 마친 뒤, 브라우저가 한가할 때(스크롤 중이 아닐 때) 한 번
+    tokenTimer = setTimeout(() => { tokenIdle = window.requestIdleCallback ? requestIdleCallback(() => { tokenIdle = 0; recountTokens(); }, { timeout: 2000 }) : (recountTokens(), 0); }, 800);
     rememberOn();
 }
 
@@ -2161,14 +2209,22 @@ function importGroups() {
 async function importFromPreset() {
     const here = presetKey();
     const stem = s => nfcName(s).toLowerCase().replace(/[\s_\-.]*v?\d+(?:\.\d+)*\s*$/i, '').replace(/[\d.]+/g, '').trim();
-    const list = Object.entries(settings().presets).filter(([k, v]) => nfcName(k) !== nfcName(here) && v?.groups?.length)
-        .map(([k, v]) => ({ k, n: v.groups.length, near: stem(k) && stem(k) === stem(here) }))
+    // 프리셋 파일에만 있는 그룹(settings 에 사본이 없는 것)도 모음
+    const found = new Map();
+    let names = [];
+    try { const n = getPresetManager('openai')?.getPresetList()?.preset_names; names = n ? (Array.isArray(n) ? n : Object.keys(n)) : []; } catch { names = []; }
+    const index = presetIndex();
+    for (const k of names) { const g = fileGroups(k, index); if (Array.isArray(g) && g.length) found.set(k, g); }
+    for (const k of presetKeys()) { const g = settings().presets[k]?.groups; if (g?.length && !found.has(k)) found.set(k, g); }
+    const groupsOf = k => settings().presets[k]?.groups?.length ? settings().presets[k].groups : found.get(k);
+    const list = [...found].filter(([k]) => nfcName(k) !== nfcName(here))
+        .map(([k]) => ({ k, n: groupsOf(k).length, near: stem(k) && stem(k) === stem(here) }))
         .sort((a, b) => (b.near - a.near) || (a.near ? b.k.localeCompare(a.k, undefined, { numeric: true }) : a.k.localeCompare(b.k)));   // 같은 이름 프리셋은 최신 버전 먼저
     const box = readBoxGroups();
     if (!list.length && !box) return toastr.info(tr`No other preset has groups yet.`, tr`Prompt Folders`);
     const namesOf = from => { try { return Object.fromEntries((getPresetManager('openai')?.getCompletionPresetByName(from)?.prompts || []).map(p => [p.identifier, p.name || ''])); } catch { return {}; } };   // 없으면 id 로만
     // 이 프리셋 파일에 보물상자 그룹이 있으면 맨 위에
-    await openGroupEditor({ sources: [...(box ? [boxSource(box)] : []), ...list.map(x => ({ key: x.k, label: `${x.k} — ${tr`${x.n} groups`}`, near: x.near, load: () => ({ groups: settings().presets[x.k].groups, names: namesOf(x.k) }) }))] });
+    await openGroupEditor({ sources: [...(box ? [boxSource(box)] : []), ...list.map(x => ({ key: x.k, label: `${x.k} — ${tr`${x.n} groups`}`, near: x.near, load: () => ({ groups: groupsOf(x.k), names: namesOf(x.k) }) }))] });
 }
 
 /** 그룹 색 고르기: 서로 어울리는 견본 10개 + 자동(이모지·차례) + 직접 고르기 */
@@ -3033,7 +3089,19 @@ const rowWatched = new WeakSet();
 let rowTimer = null;
 // 마지막으로 잰 줄 모양(목록에 건 --pf-* 값) — 목록을 다시 그릴 때마다 처음부터 재면(강제 배치 계산 · :has 검색) 채팅을 열 때 매번 수십 ms.
 // 테마 · 폭이 바뀌면 그쪽 신호가 다시 재므로, 다시 그리기만 했을 땐 잰 값을 그대로 씀
-let rowLookCache = null;
+let rowLookCache = null, rowLookSig = '';
+// 줄 모양을 바꿀 수 있는 것: 테마 CSS 글 · <html> 의 테마 변수(색 · 글꼴 · 크기). 채팅을 열 때도 <html> style 이 바뀌는데(배경 등) 그건 줄 모양과 상관없음
+function lookSig() {
+    const css = document.getElementById('custom-style')?.textContent || '';
+    const st = document.documentElement.style;
+    const vars = [...st].filter(k => /^--(SmartTheme|main|font|blur|shadow)|font/i.test(k)).map(k => k + ':' + st.getPropertyValue(k)).join(';');
+    return css.length + '|' + css.slice(0, 200) + css.slice(-200) + '|' + vars;
+}
+/** 테마 · 패널 신호에서 부름: 줄 모양을 바꿀 것이 그대로면 잰 값을 그대로 둠 */
+function syncRowMetricsIfChanged() {
+    if (rowLookCache && lookSig() === rowLookSig) return syncRowMetrics(true);
+    syncRowMetrics();
+}
 function syncRowMetrics(reuse = false) {
     const list = document.getElementById(LIST_ID);
     if (!list) return;
@@ -3074,6 +3142,7 @@ function syncRowMetrics(reuse = false) {
     if (!heights.length) return;   // 모두 접혀 있으면 지난 값 그대로
     const rowH = Math.min(...heights) + 'px';
     if (list.style.getPropertyValue('--pf-row-h') !== rowH) list.style.setProperty('--pf-row-h', rowH);
+    rowLookSig = lookSig();
     rowLookCache = new Map([...list.style].filter(k => k.startsWith('--pf-')).map(k => [k, list.style.getPropertyValue(k)]));
 }
 
@@ -3172,15 +3241,15 @@ function init() {
     // 테마가 바뀌면 바로 한 번, 0.3초 뒤 한 번 더(다른 확장이 테마를 보고 붙이는 손질은 그 뒤에 들어옴)
     // 테마를 바꾸면 <html> style 변수가 수십 번 따로 바뀌어 신호도 수십 번 옴 → 매번 재면(강제 배치 계산) 전환이 버벅였음. 몰아서 잼
     let soonSync, lateSync;
-    const resync = () => { clearTimeout(soonSync); soonSync = setTimeout(syncRowMetrics, 50); clearTimeout(lateSync); lateSync = setTimeout(syncRowMetrics, 300); };
+    const resync = () => { clearTimeout(soonSync); soonSync = setTimeout(syncRowMetricsIfChanged, 50); clearTimeout(lateSync); lateSync = setTimeout(syncRowMetricsIfChanged, 300); };
     if (themeCss) new MutationObserver(resync).observe(themeCss, { childList: true, characterData: true, subtree: true });
     // 테마 글자 · 바탕색(실리태번이 <html> style 에 넣는 변수)은 테마 CSS 와 따로 바뀜 → 그때도
     new MutationObserver(resync).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
     // 프롬프트 창(왼쪽 패널)을 열거나 탭을 바꿀 때도 다시 잼 — 테마를 바꿀 땐 창이 닫혀 있어 잴 줄이 없을 수 있음
     document.addEventListener('click', (e) => {
         if (e.target?.closest?.('#ai-config-button .drawer-toggle, #left-nav-panel .openai-tab-buttons')) {
-            setTimeout(syncRowMetrics, 150);
-            setTimeout(syncRowMetrics, 600);
+            setTimeout(syncRowMetricsIfChanged, 150);
+            setTimeout(syncRowMetricsIfChanged, 600);
         } else if (e.target?.closest?.('.pf-group-head')) {
             // 그룹을 열고 닫을 땐 이미 잰 값을 그대로(다시 재면 위 그룹 머리들이 1px씩 늦게 움직임) — 아직 못 쟀을 때만
             const list = document.getElementById(LIST_ID);
@@ -3281,6 +3350,7 @@ async function addSettingsPanel() {
             settings()[key] = cb.checked;
             saveSettingsDebounced();
             if (key === 'syncPreset' && cb.checked) syncToPreset();
+            if (key === 'syncPreset' && !cb.checked) { presetKeys().forEach(k => setPersist(k, true)); saveSettingsDebounced(); }   // 파일에만 있던 그룹을 settings 로 되돌림
             apply();
         });
     }
