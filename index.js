@@ -3170,8 +3170,9 @@ function init() {
     // 테마를 바꾸면 줄 높이가 달라지므로 다시 잼
     const themeCss = document.getElementById('custom-style');
     // 테마가 바뀌면 바로 한 번, 0.3초 뒤 한 번 더(다른 확장이 테마를 보고 붙이는 손질은 그 뒤에 들어옴)
-    let lateSync;
-    const resync = () => { syncRowMetrics(); clearTimeout(lateSync); lateSync = setTimeout(syncRowMetrics, 300); };
+    // 테마를 바꾸면 <html> style 변수가 수십 번 따로 바뀌어 신호도 수십 번 옴 → 매번 재면(강제 배치 계산) 전환이 버벅였음. 몰아서 잼
+    let soonSync, lateSync;
+    const resync = () => { clearTimeout(soonSync); soonSync = setTimeout(syncRowMetrics, 50); clearTimeout(lateSync); lateSync = setTimeout(syncRowMetrics, 300); };
     if (themeCss) new MutationObserver(resync).observe(themeCss, { childList: true, characterData: true, subtree: true });
     // 테마 글자 · 바탕색(실리태번이 <html> style 에 넣는 변수)은 테마 CSS 와 따로 바뀜 → 그때도
     new MutationObserver(resync).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
