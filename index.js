@@ -870,6 +870,7 @@ function watchBar() {
     barWatch = new MutationObserver(records => {
         // 자리 재기는 한 화면(프레임)에 한 번만 — 바뀔 때마다 바로 재면 채팅을 열 때 프롬프트 목록을 다시 그리는 동안 레이아웃을 수십 번 다시 계산함(0.17초)
         if (!sideFrame) sideFrame = requestAnimationFrame(() => { sideFrame = 0; sideBySide(document.querySelector(`#${CONTAINER_ID} .pf-toolbar`)); });
+        if (document.querySelector(`#${CONTAINER_ID} .pf-toolbar`)) return;   // 있으면 치운 게 아님 — 목록을 다시 그릴 때 생기는 기록 수천 개를 훑지 않게
         const kicked = records.some(r => [...r.removedNodes].some(n => n.nodeType === 1 && n.classList?.contains('pf-toolbar') && !ownRemoved.has(n) && !n.isConnected));
         if (!kicked || document.querySelector(`#${CONTAINER_ID} .pf-toolbar`)) return;
         const now = Date.now();
@@ -3024,13 +3025,16 @@ async function deleteGroup(g) {
 
 function scheduleApply() {
     clearTimeout(applyTimer);
-    applyTimer = setTimeout(() => { apply(); syncRowMetrics(); }, 30);
+    applyTimer = setTimeout(() => { apply(); syncRowMetrics(true); }, 30);
 }
 
 /** 그룹 머리 줄 높이를 테마의 프롬프트 줄(한 줄짜리) 높이에 맞춤 — 테마마다 31~51px 로 달라서 고정 34px 이면 튀었음 */
 const rowWatched = new WeakSet();
 let rowTimer = null;
-function syncRowMetrics() {
+// 마지막으로 잰 줄 모양(목록에 건 --pf-* 값) — 목록을 다시 그릴 때마다 처음부터 재면(강제 배치 계산 · :has 검색) 채팅을 열 때 매번 수십 ms.
+// 테마 · 폭이 바뀌면 그쪽 신호가 다시 재므로, 다시 그리기만 했을 땐 잰 값을 그대로 씀
+let rowLookCache = null;
+function syncRowMetrics(reuse = false) {
     const list = document.getElementById(LIST_ID);
     if (!list) return;
     // 테마를 바꿀 때 프롬프트 창이 닫혀 있으면 잴 줄이 없음 → 목록이 보이거나 크기가 바뀌면 다시 잼 (실리태번이 목록을 새로 만들 수 있어 목록마다 한 번 붙임)
@@ -3038,13 +3042,19 @@ function syncRowMetrics() {
         rowWatched.add(list);
         // 폭이 바뀔 때(테마 · 패널 크기)만 다시 잼 — 그룹을 열고 닫아 높이만 바뀔 때 다시 재면
         // 새로 보이는 줄 때문에 값이 1px 오가며 위 그룹 머리들이 한 박자 늦게 움직였음(「뚜둑」)
-        let lastW = -1;
+        let lastW = -1, first = true;
         new ResizeObserver(([e]) => {
             const w = Math.round(e.contentRect.width);
+            // 처음 붙일 때 오는 신호: 실리태번이 목록을 새로 만든 것뿐이면(잰 값이 있으면) 다시 재지 않음
+            if (first) { first = false; if (reuse && rowLookCache) { lastW = w; return; } }
             if (w === lastW && list.style.getPropertyValue('--pf-row-h')) return;
             lastW = w;
             clearTimeout(rowTimer); rowTimer = setTimeout(syncRowMetrics, 80);
         }).observe(list);
+    }
+    if (reuse && rowLookCache) {
+        for (const [k, v] of rowLookCache) if (list.style.getPropertyValue(k) !== v) list.style.setProperty(k, v);
+        return;
     }
     const heights = [];
     for (const row of list.querySelectorAll('li.completion_prompt_manager_prompt:not(.completion_prompt_manager_list_head)')) {
@@ -3064,6 +3074,7 @@ function syncRowMetrics() {
     if (!heights.length) return;   // 모두 접혀 있으면 지난 값 그대로
     const rowH = Math.min(...heights) + 'px';
     if (list.style.getPropertyValue('--pf-row-h') !== rowH) list.style.setProperty('--pf-row-h', rowH);
+    rowLookCache = new Map([...list.style].filter(k => k.startsWith('--pf-')).map(k => [k, list.style.getPropertyValue(k)]));
 }
 
 // 테마가 프롬프트 줄을 상자(테두리 · 바탕 · 둥근 모서리)로 그리면 그룹 머리도 같은 상자로 — 안쪽 줄만 테마를 따르고 그룹 머리는 맨글로 보였음
@@ -3130,6 +3141,7 @@ function pause() {
 function resume() {
     const container = document.getElementById(CONTAINER_ID);
     if (observer && container) observer.observe(container, { childList: true, subtree: true });
+    barWatch?.takeRecords();   // 우리가 줄을 옮긴 기록은 버림
 }
 
 function init() {
