@@ -1365,6 +1365,9 @@ function openGroupMenu(g, anchor, range) {
     item('fa-palette', escapeHtml(tr`Change color`), () => pickColor(g, anchor));
     item(g.exclusive ? 'fa-toggle-on' : 'fa-toggle-off', escapeHtml(tr`Only one on at a time`), () => setExclusive(g, !g.exclusive));
     setMenuItems(menu, g, item);
+    const sepMove = document.createElement('div');
+    sepMove.className = 'pf-menu-sep';
+    menu.append(sepMove);
     item('fa-arrow-up', escapeHtml(tr`Move group up`), () => stepGroup(g, -1));
     item('fa-arrow-down', escapeHtml(tr`Move group down`), () => stepGroup(g, 1));
     const sep2 = document.createElement('div');
