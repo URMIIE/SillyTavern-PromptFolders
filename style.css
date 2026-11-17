@@ -631,7 +631,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-toolbar .pf-tools.pf-new::after, .pf-menu .pf-menu-item.pf-new::after { content: "N"; position: absolute; top: 0; right: -2px; min-width: 1.4em; height: 1.4em; padding: 0 .2em; box-sizing: border-box; border-radius: 999px; background: #e5484d; color: #fff; font-size: max(.6em, 8px); font-family: system-ui, sans-serif; font-weight: 700; line-height: 1.4em; text-align: center; pointer-events: none; }
 .pf-menu .pf-menu-item.pf-new { position: relative; }
 .pf-menu .pf-menu-item.pf-new::after { position: static; margin-left: auto; }
-.pf-log h3 { margin: 0 0 8px; }
+.pf-log h3 { margin-bottom: 8px; }
 .pf-log .pf-log-now { padding: 8px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 45%, transparent); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 7%, transparent); text-align: left; }
 .pf-log .pf-log-head { display: flex; align-items: baseline; gap: 8px; font-weight: 600; margin: 2px 0; }
 .pf-log .pf-log-head small { font-weight: 400; opacity: .65; }
@@ -649,6 +649,7 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-menu .pf-menu-dim { opacity: .55; margin-left: 4px; }
 .pf-set-edit { text-align: left; display: flex; flex-direction: column; gap: 8px; }
 .pf-set-edit h3 { margin: 0; }
+.pf-set-edit h3, .pf-log h3 { padding-top: .2em; line-height: 1.35; }   /* 기울인 제목 글꼴의 키 큰 한글 윗부분이 창 칸에 잘리던 것 */
 .pf-set-edit .pf-set-list { height: min(46vh, 22em); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--pf-line); border-radius: 8px; padding: 4px 8px; }
 .pf-set-edit .pf-set-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; cursor: pointer; }
 .pf-set-edit .pf-set-row input { margin: 0; flex-shrink: 0; }
