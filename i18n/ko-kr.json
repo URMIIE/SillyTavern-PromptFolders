@@ -212,5 +212,10 @@
     "A group made this time": "이번에 새로 만드는 그룹",
     "the names of ${0} toggles and their order.": "토글 ${0}개의 이름과 순서.",
     "Edit this group": "이 그룹 편집",
-    "All toggles · pick 1": "빠짐없이 · 택1 자동"
+    "All toggles · pick 1": "빠짐없이 · 택1 자동",
+    "Update history": "업데이트 내역",
+    "Update history (${0})": "업데이트 내역 (${0})",
+    "What's new": "새로 바뀐 것",
+    "Earlier updates": "지난 업데이트",
+    "Couldn't read the update history.": "업데이트 내역을 읽지 못했어요."
 }

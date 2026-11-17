@@ -625,3 +625,20 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-be-trans .pf-be-trans-eng .pf-ed-chip.pf-mt-off { opacity: .45; border-style: dashed; }
 /* 도구 줄 바로 다음에 다른 확장 줄이 있을 때: 그 줄을 도구 줄 왼쪽 빈자리로 끌어올려 나란히 */
 #completion_prompt_manager .pf-toolbar.pf-bar-side + * { margin-top: calc(-1 * var(--pf-side-h, 0px)) !important; max-width: calc(100% - var(--pf-side-w, 0px) - 12px) !important; position: relative; z-index: 1; }
+
+/* 업데이트 내역: ⋯ 버튼 · 메뉴 항목의 N 표시, 내역 창(이번 판 펼침 · 지난 판 접음, 고정 높이 스크롤) */
+.pf-toolbar .pf-tools { position: relative; }
+.pf-toolbar .pf-tools.pf-new::after, .pf-menu .pf-menu-item.pf-new::after { content: "N"; position: absolute; top: 0; right: -2px; min-width: 1.4em; height: 1.4em; padding: 0 .2em; box-sizing: border-box; border-radius: 999px; background: #e5484d; color: #fff; font-size: max(.6em, 8px); font-family: system-ui, sans-serif; font-weight: 700; line-height: 1.4em; text-align: center; pointer-events: none; }
+.pf-menu .pf-menu-item.pf-new { position: relative; }
+.pf-menu .pf-menu-item.pf-new::after { position: static; margin-left: auto; }
+.pf-log h3 { margin: 0 0 8px; }
+.pf-log .pf-log-now { padding: 8px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 45%, transparent); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 7%, transparent); text-align: left; }
+.pf-log .pf-log-head { display: flex; align-items: baseline; gap: 8px; font-weight: 600; margin: 2px 0; }
+.pf-log .pf-log-head small { font-weight: 400; opacity: .65; }
+.pf-log ul { margin: 2px 0 6px; padding-left: 20px; font-size: .92em; text-align: left; }
+.pf-log li { margin: 2px 0; }
+.pf-log .pf-log-old { margin-top: 8px; text-align: left; }
+.pf-log .pf-log-old > summary { cursor: pointer; font-weight: 600; }
+.pf-log .pf-log-count { opacity: .6; font-weight: 400; }
+.pf-log .pf-log-scroll { height: 14em; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; margin-top: 4px; }
+.pf-log .pf-log-scroll .pf-log-head:not(:first-child) { margin-top: 8px; }

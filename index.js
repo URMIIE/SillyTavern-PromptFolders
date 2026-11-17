@@ -291,9 +291,17 @@ function restoreRows(container) {
     mark.remove();
 }
 
+let barGuests = [];
 function cleanup(container) {
     restoreRows(container);
     container.querySelectorAll('li.pf-clone').forEach(el => { el.classList.remove('pf-clone'); delete el.dataset.pfId; });
+    // 다른 확장이 우리 도구 줄에 넣어 둔 것은 챙겨 두었다가 새 줄에 같은 자리(앞 · 뒤)로 옮겨 담음 — 새 줄을 만든 직후 그 확장이 다시 넣기 전에 자리를 재면
+    // 그 폭이 빠진 채 재여 아래 줄을 끌어올려 겹쳤음
+    const oldBar = container.querySelector('.pf-toolbar');
+    if (oldBar) {
+        const kids = [...oldBar.children], firstOwn = kids.findIndex(k => k.classList.contains('pf-ib'));
+        barGuests = kids.map((el, i) => ({ el, front: firstOwn < 0 || i < firstOwn })).filter(x => !x.el.classList.contains('pf-ib'));
+    }
     container.querySelectorAll('.pf-toolbar').forEach(el => ownRemoved.add(el));
     container.querySelectorAll('.pf-toolbar, li.pf-group, li.pf-empty, .pf-pos, .pf-tag, .pf-check').forEach(el => el.remove());
     container.querySelectorAll('li.pf-filtered').forEach(el => el.classList.remove('pf-filtered'));
@@ -820,6 +828,7 @@ function renderToolbar(list, groups) {
         bar.querySelector('.pf-edit').addEventListener('click', () => (presetData().groups.length ? openGroupEditor({}) : createGroup(null)));
         bar.querySelector('.pf-auto')?.addEventListener('click', autoGroup);
         bar.querySelector('.pf-tools').addEventListener('click', ev => openToolsMenu(ev.currentTarget));
+        bar.querySelector('.pf-tools').classList.toggle('pf-new', unseenLog());
         bar.querySelector('.pf-view')?.addEventListener('click', () => {
             settings().view = view === 'original' ? 'grouped' : 'original';
             save();
@@ -832,6 +841,9 @@ function renderToolbar(list, groups) {
     bar.querySelectorAll('[role="button"]').forEach(el => el.addEventListener('keydown', ev => {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); el.click(); }
     }));
+    const guests = barGuests; barGuests = [];
+    const firstOwn = bar.firstElementChild;
+    for (const g of guests) { if (g.front) bar.insertBefore(g.el, firstOwn); else bar.append(g.el); }
     placeBar(bar, list);
 }
 
@@ -885,11 +897,12 @@ function sideBySide(bar, force = false) {
     if (!bar?.isConnected) return;
     const next = bar.nextElementSibling, wrap = bar.parentElement;
     // 도구 줄은 다시 그릴 때마다 새로 만들어지므로 견주는 건 자리(부모 · 이웃 · 자리 설정)만, 잰 결과(side)는 새 줄에 그대로 입힘
-    if (!force && sideLast && sideLast.wrap === wrap && sideLast.next === next && sideLast.spot === bar.classList.contains('pf-bar-sidespot')) {
+    // 줄 안 항목 수도 견줌 — 다른 확장이 뒤늦게 우리 줄에 버튼을 넣으면 폭이 달라지므로 다시 잼
+    if (!force && sideLast && sideLast.wrap === wrap && sideLast.next === next && sideLast.count === bar.childElementCount && sideLast.spot === bar.classList.contains('pf-bar-sidespot')) {
         if (bar.classList.contains('pf-bar-side') !== sideLast.side) bar.classList.toggle('pf-bar-side', sideLast.side);
         return;
     }
-    sideLast = { wrap, next, spot: bar.classList.contains('pf-bar-sidespot'), side: false };
+    sideLast = { wrap, next, count: bar.childElementCount, spot: bar.classList.contains('pf-bar-sidespot'), side: false };
     const foreign = bar.classList.contains('pf-bar-sidespot') && !!next && next.id !== LIST_ID && !next.classList.contains('completion_prompt_manager_footer') && !next.classList.contains('pf-toolbar') && !next.classList.contains('pf-group');
     let side = false;
     if (foreign) {
@@ -1254,6 +1267,35 @@ function placeMenu(menu, anchor) {
     setTimeout(() => document.addEventListener('pointerdown', onMenuOutside, true), 0);
 }
 
+// 업데이트 내역(CHANGELOG.json): 새 판 내역을 아직 안 봤으면 ⋯ 버튼에 N, ⋯ 메뉴 맨 위에서 열면 본 것으로(settings.seenLog)
+// 설정 칸은 접어 두거나 숨긴 사람이 있어서, 늘 보이는 도구 줄 ⋯ 에 표시함
+let pfVersion = '';
+let changelog = null;
+const loadLog = () => changelog ??= fetch(new URL('CHANGELOG.json', import.meta.url), { cache: 'no-cache' })
+    .then(r => r.json()).then(j => Array.isArray(j) ? j : []).catch(() => { changelog = null; return []; });
+const unseenLog = () => !!pfVersion && settings().seenLog !== pfVersion;
+const paintNew = () => document.querySelectorAll('.pf-toolbar .pf-tools').forEach(b => b.classList.toggle('pf-new', unseenLog()));
+async function loadVersion() {
+    try { pfVersion = String((await (await fetch(new URL('manifest.json', import.meta.url), { cache: 'no-cache' })).json()).version || ''); } catch { pfVersion = ''; }
+    paintNew();
+}
+async function showChangelog() {
+    const e = escapeHtml;
+    const log = await loadLog();
+    if (!log.length) return void toastr.info(tr`Couldn't read the update history.`, tr`Prompt Folders`);
+    const items = v => `<ul>${(v.items || []).map(t => `<li>${e(t)}</li>`).join('')}</ul>`;
+    const head = v => `<b>${e(v.version)}</b><small>${e(v.date || '')}</small>`;
+    const [now, ...old] = log;
+    const box = document.createElement('div');
+    box.className = 'pf-log';
+    box.innerHTML = `<h3>${e(tr`Update history`)}</h3>`
+        + `<div class="pf-log-now"><div class="pf-log-head">${e(tr`What's new`)} ${head(now)}</div>${items(now)}</div>`
+        + (old.length ? `<details class="pf-log-old"><summary>${e(tr`Earlier updates`)} <span class="pf-log-count">${old.length}</span></summary>`
+            + `<div class="pf-log-scroll">${old.map(v => `<div class="pf-log-head">${head(v)}</div>${items(v)}`).join('')}</div></details>` : '');
+    if (unseenLog()) { settings().seenLog = pfVersion; saveSettingsDebounced(); paintNew(); }
+    await callGenericPopup(box, POPUP_TYPE.TEXT, '');
+}
+
 /** Small menu for the toolbar's ⋯ button: export / import */
 function openToolsMenu(anchor) {
     if (toggleSameMenu(anchor)) return;
@@ -1271,6 +1313,8 @@ function openToolsMenu(anchor) {
     info.className = 'pf-menu-info';
     info.textContent = presetKey();
     menu.append(info);
+    // 새 판 내역을 아직 안 봤을 때만 — 한 번 보면 메뉴에서도 빠짐
+    if (unseenLog()) { item('fa-clock-rotate-left', tr`Update history (${pfVersion})`, showChangelog); menu.lastElementChild.classList.add('pf-new'); }
     item('fa-wand-magic-sparkles', tr`Auto-group`, autoGroup);
     const sepL = document.createElement('div');
     sepL.className = 'pf-menu-sep';
@@ -3226,6 +3270,7 @@ function init() {
     const { eventSource, event_types } = SillyTavern.getContext();
     eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, () => { scheduleApply(); setTimeout(syncToPreset, 500); });
     pruneSettings();
+    void loadVersion();
     observer = new MutationObserver(mutations => {
         // ST가 목록을 다시 그렸거나 줄 순서가 바뀐 경우에만 다시 적용
         // 목록 밖(다른 확장이 목록 위에 붙이는 줄 등)의 변화는 무시 — 서로 다시 그리며 끝없이 도는 것을 막음
