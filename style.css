@@ -642,3 +642,17 @@ body.pf-color-none .pf-ed-tag::before { display: none; }
 .pf-log .pf-log-count { opacity: .6; font-weight: 400; }
 .pf-log .pf-log-scroll { height: 14em; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; margin-top: 4px; }
 .pf-log .pf-log-scroll .pf-log-head:not(:first-child) { margin-top: 8px; }
+
+/* 그룹 세트: 머리 줄 칩 · 세트 고치기 창(목록은 고정 높이 스크롤) */
+.pf-group-head .pf-btn.pf-setchip { width: auto; height: auto; min-width: 0; max-width: 9em; gap: 3px; padding: 1px 8px; border-radius: 999px; font-size: .78em; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid var(--pf-line); color: var(--SmartThemeBodyColor); background: color-mix(in srgb, var(--SmartThemeQuoteColor) 10%, transparent); cursor: pointer; flex-shrink: 1; }
+.pf-group-head .pf-btn.pf-setchip i { font-size: .85em; opacity: .7; }
+.pf-menu .pf-menu-dim { opacity: .55; margin-left: 4px; }
+.pf-set-edit { text-align: left; display: flex; flex-direction: column; gap: 8px; }
+.pf-set-edit h3 { margin: 0; }
+.pf-set-edit .pf-set-list { height: min(46vh, 22em); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--pf-line); border-radius: 8px; padding: 4px 8px; }
+.pf-set-edit .pf-set-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; cursor: pointer; }
+.pf-set-edit .pf-set-row input { margin: 0; flex-shrink: 0; }
+.pf-log .pf-log-once { display: block; margin-top: 10px; opacity: .65; font-size: .85em; text-align: center; }
+.pf-log .pf-log-title { font-weight: 700; margin: 4px 0 2px; text-align: left; }
+/* 세트가 있는 그룹은 꺼진 택1 표시를 머리 줄에서 뺌(⋮ 메뉴에서 켬) — 좁은 화면에서 세트 이름 버튼 때문에 그룹 이름이 잘렸음 */
+.pf-group-head:has(.pf-setchip) .pf-one.pf-one-off { display: none; }

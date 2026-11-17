@@ -1021,11 +1021,12 @@ function paintHead(head, g, items, rowById, pos, tree) {
     if (count && count.textContent !== text) { if (count.firstChild?.nodeType === Node.TEXT_NODE) count.firstChild.data = text; else count.textContent = text; }
     const sw = head.querySelector('.pf-toggle-all');
     if (sw) {
-        const on = g.exclusive ? enabledCount > 0 : allOn;
+        const set = activeSetOf(g);
+        const on = g.exclusive || set ? enabledCount > 0 : allOn;
         cls(sw, 'fa-toggle-on', on);
         cls(sw, 'fa-toggle-off', !on);
-        cls(sw, 'pf-btn-idle', !!g.exclusive && !enabledCount);
-        attr(sw, 'title', g.exclusive ? (enabledCount ? tr`Turn the whole group off` : tr`Turn one toggle on from inside the group`) : (allOn ? tr`Turn the whole group off` : tr`Turn the whole group on`));
+        cls(sw, 'pf-btn-idle', !!g.exclusive && !set && !enabledCount);
+        attr(sw, 'title', set ? (enabledCount ? tr`Turn the whole group off` : tr`Turn on the set: ${set.name}`) : g.exclusive ? (enabledCount ? tr`Turn the whole group off` : tr`Turn one toggle on from inside the group`) : (allOn ? tr`Turn the whole group off` : tr`Turn the whole group on`));
     }
 }
 
@@ -1128,6 +1129,7 @@ function buildGroup(g, ctx, depth) {
         ${subCount ? '<span class="pf-folder fa-solid fa-folder-tree"></span>' : ''}
         <span class="pf-name">${escapeHtml(g.name)}</span>
         <span class="pf-btn pf-one${exclusive ? '' : ' pf-one-off'}" role="button" tabindex="0" aria-pressed="${exclusive}" title="${escapeHtml(exclusive ? tr`Only one toggle in this group can be on. Click to turn off.` : tr`Click to allow only one toggle on in this group`)}">${escapeHtml(tr`Pick 1`)}</span>
+        ${groupSets(g).length ? `<span class="pf-btn pf-setchip" role="button" tabindex="0" title="${escapeHtml((activeSetOf(g)?.name || tr`All`) + ' · ' + tr`Toggle set to turn on. Click to change.`)}">${escapeHtml(activeSetOf(g)?.name || tr`All`)}<i class="fa-solid fa-caret-down"></i></span>` : ''}
         <span class="pf-count">${enabledCount}/${items.length}</span>
         ${exclusive
         ? `<span class="pf-btn pf-toggle-all fa-solid ${enabledCount ? 'fa-toggle-on' : 'fa-toggle-off pf-btn-idle'}" role="button" title="${escapeHtml(enabledCount ? tr`Turn the whole group off` : tr`Turn one toggle on from inside the group`)}"></span>`
@@ -1148,11 +1150,21 @@ function buildGroup(g, ctx, depth) {
         const snap = takeSnap();
         const live = liveOn();
         const n = items.filter(id => live.get(id)).length, every = items.length > 0 && n === items.length;
+        const set = activeSetOf(g);
+        // 세트를 골라 둔 그룹: 켜면 그 세트만, 하나라도 켜져 있으면 끔
+        if (set) {
+            if (n) { toggleAll(items, false); offerRestore(snap, tr`Turned off "${g.name}".`); }
+            else { applySet(g, set, items); offerRestore(snap, tr`Turned on the set: ${set.name}`); }
+            return;
+        }
         if (exclusive) { if (n) { toggleAll(items, false); offerRestore(snap, tr`Turned off "${g.name}".`); } return; }
         toggleAll(items, !every);
         offerRestore(snap, every ? tr`Turned off "${g.name}".` : tr`Turned on all of "${g.name}".`);
     });
     head.querySelector('.pf-more').addEventListener('click', e => openGroupMenu(g, e.currentTarget, range));
+    const chip = head.querySelector('.pf-setchip');
+    chip?.addEventListener('click', e => openSetMenu(g, e.currentTarget));
+    chip?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSetMenu(g, e.currentTarget); } });
     // 머리의 「택1」을 바로 눌러 켜고 끔 (편집 창 · 메뉴를 거치지 않음)
     const one = head.querySelector('.pf-one');
     one.addEventListener('click', () => setExclusive(g, !g.exclusive));
@@ -1221,6 +1233,116 @@ function toggleSameMenu(anchor) {
     return !!open;
 }
 
+// ---------------- 그룹 세트 ----------------
+// 그룹마다 켤 토글 묶음(세트)을 이름 붙여 여러 개 저장 — 그룹 스위치를 켜면 고른 세트만 켜짐, 세트를 바꾸면 그 그룹 안만 그 세트로.
+// 프리셋 전체 상태를 저장하는 방식은 그룹 밖 토글(채팅마다 다른 언어 등)이 하나라도 다르면 맞지 않아서, 그룹 안에서만 다룸.
+// 저장: g.sets = [{ id, name, ids }], g.activeSet = 고른 세트 id(없으면 전부 켬). 그룹 정보라 프리셋 파일에도 같이 들어감
+const groupSets = g => (Array.isArray(g.sets) ? g.sets : []);
+const activeSetOf = g => groupSets(g).find(s => s.id === g.activeSet) || null;
+const promptNameOf = id => String(promptManager?.getPromptById(id)?.name || id);
+
+/** 그룹 안(하위 그룹 포함)을 세트대로: 세트에 든 토글은 켜고 나머지는 끔 */
+function applySet(g, set, items = null) {
+    const pm = promptManager;
+    if (!pm?.activeCharacter) return;
+    const ids = items || makeTree(presetData().groups).allItems(g);
+    const want = new Set(set.ids);
+    const counts = pm.tokenHandler?.getCounts?.() ?? {};
+    for (const id of ids) {
+        const prompt = pm.getPromptById(id);
+        const entry = prompt && pm.isPromptToggleAllowed(prompt) && pm.getPromptOrderEntry(pm.activeCharacter, id);
+        if (!entry || entry.enabled === want.has(id)) continue;
+        entry.enabled = want.has(id);
+        counts[id] = null;
+    }
+    commitToggles();
+}
+
+/** 세트 고르기 — 그룹에 켜진 게 있으면 바로 그 세트로 바꾸고, 다 꺼져 있으면 다음에 켤 때 쓰게 고르기만 */
+function chooseSet(g, set) {
+    g.activeSet = set?.id;
+    if (!set) delete g.activeSet;
+    save();
+    const items = makeTree(presetData().groups).allItems(g);
+    const live = liveOn();
+    if (set && items.some(id => live.get(id))) {
+        const snap = takeSnap();
+        applySet(g, set, items);
+        offerRestore(snap, tr`Switched "${g.name}" to the set: ${set.name}`);
+    }
+    apply();
+}
+
+/** 세트 고치기 창: 이름 + 그룹 토글 목록(택1 그룹이면 하나만). set 이 없으면 새로 만듦. ids = 처음 체크할 토글 */
+async function editSet(g, set = null, ids = null) {
+    const e = escapeHtml;
+    const items = makeTree(presetData().groups).allItems(g);
+    const checked = new Set(set ? set.ids : ids || []);
+    const one = !!g.exclusive;
+    const box = document.createElement('div');
+    box.className = 'pf-set-edit';
+    box.innerHTML = `<h3>${e(set ? tr`Edit set` : tr`New set`)} · ${e(g.name)}</h3>
+        <input type="text" class="text_pole pf-set-name" maxlength="30" placeholder="${e(tr`Set name (e.g. Daily, Serious)`)}" value="${e(set?.name || '')}">
+        <small class="pf-help">${e(one ? tr`Pick the one toggle this set turns on.` : tr`Check the toggles this set turns on. The rest of the group is turned off.`)}</small>
+        <div class="pf-set-list">${items.map(id => `<label class="pf-set-row"><input type="${one ? 'radio' : 'checkbox'}" name="pf-set-pick" value="${e(id)}"${checked.has(id) ? ' checked' : ''}><span>${e(promptNameOf(id))}</span></label>`).join('')}</div>`;
+    const ok = await callGenericPopup(box, POPUP_TYPE.CONFIRM, '', { okButton: tr`Save`, cancelButton: tr`Cancel` });
+    if (!ok) return;
+    const name = box.querySelector('.pf-set-name').value.trim() || tr`Set ${groupSets(g).length + 1}`;
+    const pick = [...box.querySelectorAll('.pf-set-list input:checked')].map(x => x.value);
+    if (set) { set.name = name; set.ids = pick; }
+    else { set = { id: newId(), name, ids: pick }; (g.sets ||= []).push(set); }
+    chooseSet(g, set);
+}
+
+async function deleteSet(g, set) {
+    const ok = await callGenericPopup(escapeHtml(tr`Delete the set "${set.name}"? The toggles themselves are not changed.`), POPUP_TYPE.CONFIRM);
+    if (!ok) return;
+    g.sets = groupSets(g).filter(s => s !== set);
+    if (!g.sets.length) delete g.sets;
+    if (g.activeSet === set.id) delete g.activeSet;
+    save();
+    apply();
+}
+
+/** 메뉴에 세트 항목을 붙임(그룹 ⋮ 메뉴 · 머리 줄의 세트 이름 버튼 메뉴가 같이 씀) */
+function setMenuItems(menu, g, item) {
+    const sep = document.createElement('div');
+    sep.className = 'pf-menu-sep';
+    sep.textContent = tr`Toggle sets`;
+    menu.append(sep);
+    const cur = activeSetOf(g);
+    const sets = groupSets(g);
+    if (sets.length) {
+        item(cur ? 'fa-blank' : 'fa-check', escapeHtml(tr`All (no set)`), () => chooseSet(g, null));
+        for (const s of sets) item(s === cur ? 'fa-check' : 'fa-blank', `${escapeHtml(s.name)} <small class="pf-menu-dim">${s.ids.length}</small>`, () => chooseSet(g, s));
+    }
+    item('fa-plus', escapeHtml(tr`New set from what's on now`), () => {
+        const live = liveOn();
+        return editSet(g, null, makeTree(presetData().groups).allItems(g).filter(id => live.get(id)));
+    });
+    if (cur) {
+        item('fa-pen', escapeHtml(tr`Edit set: ${cur.name}`), () => editSet(g, cur));
+        item('fa-trash-can', escapeHtml(tr`Delete set: ${cur.name}`), () => deleteSet(g, cur));
+    }
+}
+
+function openSetMenu(g, anchor) {
+    if (toggleSameMenu(anchor)) return;
+    const menu = document.createElement('div');
+    menu.className = 'pf-menu';
+    ['mousedown', 'touchstart'].forEach(type => menu.addEventListener(type, e => e.stopPropagation()));
+    const item = (icon, label, fn) => {
+        const b = document.createElement('div');
+        b.className = 'pf-menu-item';
+        b.innerHTML = `<i class="fa-solid ${icon}"></i><span>${label}</span>`;
+        b.addEventListener('click', () => { closeGroupMenu(); fn(); });
+        menu.append(b);
+    };
+    setMenuItems(menu, g, item);
+    menu.firstElementChild?.remove();   // 세트 이름 버튼 메뉴엔 구분 제목 없이
+    placeMenu(menu, anchor);
+}
+
 function openGroupMenu(g, anchor, range) {
     if (toggleSameMenu(anchor)) return;
     const menu = document.createElement('div');
@@ -1242,6 +1364,7 @@ function openGroupMenu(g, anchor, range) {
     item('fa-folder-plus', escapeHtml(tr`New group inside`), () => createGroup(g.id));
     item('fa-palette', escapeHtml(tr`Change color`), () => pickColor(g, anchor));
     item(g.exclusive ? 'fa-toggle-on' : 'fa-toggle-off', escapeHtml(tr`Only one on at a time`), () => setExclusive(g, !g.exclusive));
+    setMenuItems(menu, g, item);
     item('fa-arrow-up', escapeHtml(tr`Move group up`), () => stepGroup(g, -1));
     item('fa-arrow-down', escapeHtml(tr`Move group down`), () => stepGroup(g, 1));
     const sep2 = document.createElement('div');
@@ -1283,7 +1406,8 @@ async function showChangelog() {
     const e = escapeHtml;
     const log = await loadLog();
     if (!log.length) return void toastr.info(tr`Couldn't read the update history.`, tr`Prompt Folders`);
-    const items = v => `<ul>${(v.items || []).map(t => `<li>${e(t)}</li>`).join('')}</ul>`;
+    // 판마다 맨 위에 [한 줄 요약](title), 그 아래 설명 줄
+    const items = v => `${v.title ? `<div class="pf-log-title">[${e(v.title)}]</div>` : ''}<ul>${(v.items || []).map(t => `<li>${e(t)}</li>`).join('')}</ul>`;
     const head = v => `<b>${e(v.version)}</b><small>${e(v.date || '')}</small>`;
     const [now, ...old] = log;
     const box = document.createElement('div');
@@ -1292,6 +1416,7 @@ async function showChangelog() {
         + `<div class="pf-log-now"><div class="pf-log-head">${e(tr`What's new`)} ${head(now)}</div>${items(now)}</div>`
         + (old.length ? `<details class="pf-log-old"><summary>${e(tr`Earlier updates`)} <span class="pf-log-count">${old.length}</span></summary>`
             + `<div class="pf-log-scroll">${old.map(v => `<div class="pf-log-head">${head(v)}</div>${items(v)}`).join('')}</div></details>` : '');
+    box.insertAdjacentHTML('beforeend', `<small class="pf-log-once">${e(tr`This history won't show again once you close it.`)}</small>`);
     if (unseenLog()) { settings().seenLog = pfVersion; saveSettingsDebounced(); paintNew(); }
     await callGenericPopup(box, POPUP_TYPE.TEXT, '');
 }
@@ -1313,8 +1438,11 @@ function openToolsMenu(anchor) {
     info.className = 'pf-menu-info';
     info.textContent = presetKey();
     menu.append(info);
-    // 새 판 내역을 아직 안 봤을 때만 — 한 번 보면 메뉴에서도 빠짐
-    if (unseenLog()) { item('fa-clock-rotate-left', tr`Update history (${pfVersion})`, showChangelog); menu.lastElementChild.classList.add('pf-new'); }
+    // 새 판 내역을 아직 안 봤을 때만(한 번 보면 메뉴에서도 빠짐) — 설정 keepLog 가 켜져 있으면 늘 둠(내역을 자주 다시 보는 사람용, 화면엔 켜는 곳 없음)
+    if (unseenLog() || settings().keepLog) {
+        item('fa-clock-rotate-left', pfVersion ? tr`Update history (${pfVersion})` : tr`Update history`, showChangelog);
+        if (unseenLog()) menu.lastElementChild.classList.add('pf-new');
+    }
     item('fa-wand-magic-sparkles', tr`Auto-group`, autoGroup);
     const sepL = document.createElement('div');
     sepL.className = 'pf-menu-sep';
@@ -2195,7 +2323,10 @@ function remapGroups(groups, srcNames = {}) {
             else { const hit = byName.get(nfcName(srcNames[id])); if (hit) { to = hit; how[hit] = 'name'; stats.byName++; } else stats.missing++; }
             if (to && !taken.has(to)) { taken.add(to); members.push(to); }
         }
-        return { id: g.id || newId(), name: String(g.name ?? ''), members, parent: g.parent || null, collapsed: !!g.collapsed, ...(g.color ? { color: g.color } : {}), ...(Number.isInteger(g.slot) ? { slot: g.slot } : {}), ...(g.exclusive ? { exclusive: true } : {}) };
+        // 세트도 같은 방식(같은 id → 같은 이름)으로 옮김
+        const mapId = id => known.has(id) ? id : byName.get(nfcName(srcNames[id])) || null;
+        const sets = Array.isArray(g.sets) ? g.sets.map(s => ({ ...s, ids: (s.ids || []).map(mapId).filter(Boolean) })) : null;
+        return { id: g.id || newId(), name: String(g.name ?? ''), members, parent: g.parent || null, collapsed: !!g.collapsed, ...(g.color ? { color: g.color } : {}), ...(Number.isInteger(g.slot) ? { slot: g.slot } : {}), ...(g.exclusive ? { exclusive: true } : {}), ...(sets?.length ? { sets, ...(g.activeSet ? { activeSet: g.activeSet } : {}) } : {}) };
     });
     // 새 토글: 앞 · 뒤가 같은 그룹이면 그 안으로
     const order = (pm?.getPromptOrderForCharacter(pm.activeCharacter) || []).map(e => e.identifier).filter(id => known.has(id));
