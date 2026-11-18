@@ -3276,8 +3276,25 @@ function lookSig() {
     const vars = [...st].filter(k => /^--(SmartTheme|main|font|blur|shadow)|font/i.test(k)).map(k => k + ':' + st.getPropertyValue(k)).join(';');
     return css.length + '|' + css.slice(0, 200) + css.slice(-200) + '|' + vars;
 }
+// 잰 값은 브라우저 저장소에도 둠 — 메모리에만 두면 새로고침할 때마다 창을 처음 열며 화면 전체 계산을 한 번 치렀음.
+// 휴대폰 폭에선 테마가 줄 모양을 따로 정할 수 있어서 폭 구분도 같이 맞춤
+const LOOK_KEY = 'promptFolders.rowLook.v1';
+const storedSig = () => lookSig() + '|' + (window.innerWidth <= 1000 ? 'narrow' : 'wide');
+function loadStoredLook() {
+    if (rowLookCache) return;
+    try {
+        const v = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null');
+        if (!v?.vars || v.sig !== storedSig()) return;
+        rowLookCache = new Map(Object.entries(v.vars));
+        rowLookSig = lookSig();
+    } catch { /* 없으면 새로 잼 */ }
+}
+function saveStoredLook() {
+    try { localStorage.setItem(LOOK_KEY, JSON.stringify({ sig: storedSig(), vars: Object.fromEntries(rowLookCache) })); } catch { /* 저장 못 해도 다음에 다시 잴 뿐 */ }
+}
 /** 테마 · 패널 신호에서 부름: 줄 모양을 바꿀 것이 그대로면 잰 값을 그대로 둠 */
 function syncRowMetricsIfChanged() {
+    loadStoredLook();
     if (rowLookCache && lookSig() === rowLookSig) return syncRowMetrics(true);
     syncRowMetrics();
 }
@@ -3295,6 +3312,11 @@ function syncRowMetrics(reuse = false) {
             // 처음 붙일 때 오는 신호: 실리태번이 목록을 새로 만든 것뿐이면(잰 값이 있으면) 다시 재지 않음
             if (first) { first = false; if (reuse && rowLookCache) { lastW = w; return; } }
             if (w === lastW && list.style.getPropertyValue('--pf-row-h')) return;
+            // 닫혀 있던 창이 열린 것(폭 0 → 생김)은 크기가 바뀐 게 아님 — 잰 값(저장해 둔 것 포함)이 지금 테마와 맞으면 그대로 씀
+            if (lastW <= 0 && w > 0) {
+                loadStoredLook();
+                if (rowLookCache && lookSig() === rowLookSig) { lastW = w; syncRowMetrics(true); return; }
+            }
             lastW = w;
             clearTimeout(rowTimer); rowTimer = setTimeout(syncRowMetrics, 80);
         }).observe(list);
@@ -3303,6 +3325,10 @@ function syncRowMetrics(reuse = false) {
         for (const [k, v] of rowLookCache) if (list.style.getPropertyValue(k) !== v) list.style.setProperty(k, v);
         return;
     }
+    // 프롬프트 창이 닫혀 있으면 잴 줄이 없어(잰 값도 안 남아) 채팅을 열 때마다 처음부터 재며 화면 전체 계산을 치렀음 → 닫혀 있으면 안 잼.
+    // 창이 열려 목록 크기가 생기면 위 ResizeObserver 가 다시 부름
+    const panel = list.closest('.drawer-content');
+    if (panel && !panel.classList.contains('openDrawer')) return;
     const heights = [];
     for (const row of list.querySelectorAll('li.completion_prompt_manager_prompt:not(.completion_prompt_manager_list_head)')) {
         if (!row.offsetParent) continue;   // 접힌 그룹 안 줄
@@ -3323,6 +3349,7 @@ function syncRowMetrics(reuse = false) {
     if (list.style.getPropertyValue('--pf-row-h') !== rowH) list.style.setProperty('--pf-row-h', rowH);
     rowLookSig = lookSig();
     rowLookCache = new Map([...list.style].filter(k => k.startsWith('--pf-')).map(k => [k, list.style.getPropertyValue(k)]));
+    saveStoredLook();
 }
 
 // 테마가 프롬프트 줄을 상자(테두리 · 바탕 · 둥근 모서리)로 그리면 그룹 머리도 같은 상자로 — 안쪽 줄만 테마를 따르고 그룹 머리는 맨글로 보였음
@@ -3415,7 +3442,7 @@ function init() {
     });
     resume();
     apply();
-    syncRowMetrics();
+    syncRowMetricsIfChanged();
     // 테마를 바꾸면 줄 높이가 달라지므로 다시 잼
     const themeCss = document.getElementById('custom-style');
     // 테마가 바뀌면 바로 한 번, 0.3초 뒤 한 번 더(다른 확장이 테마를 보고 붙이는 손질은 그 뒤에 들어옴)
