@@ -5,7 +5,7 @@
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
-            <small class="pf-help">프롬프트 관리자 토글을 그룹으로 묶어요. 프롬프트 목록 위 도구 줄에서 그룹 만들기, ⋯ 메뉴에서 자동으로 묶기·그룹 배치·내보내기/가져오기를 해요. 토글이나 그룹 머리를 끌어서 옮기고, 그룹 머리 위에 놓으면 그 그룹 안으로 들어가요.</small>
+            <div class="pf-help-intro"><button type="button" class="pf-help-close" title="설명 닫기" aria-label="설명 닫기"><i class="fa-solid fa-xmark"></i></button><small class="pf-help">프롬프트 관리자 토글을 그룹으로 묶어요. 프롬프트 목록 위 도구 줄에서 그룹 만들기, ⋯ 메뉴에서 자동으로 묶기·그룹 배치·내보내기/가져오기를 해요. 토글이나 그룹 머리를 끌어서 옮기고, 그룹 머리 위에 놓으면 그 그룹 안으로 들어가요.</small></div>
             <label class="pf-set-row" for="pf_layout">
                 <span>그룹 배치</span>
                 <select id="pf_layout" class="text_pole">
@@ -18,7 +18,7 @@
                 <select id="pf_barPos" class="text_pole">
                     <option value="auto">자동 (다른 확장과 자리가 겹치면 비켜 감)</option>
                     <option value="top">목록 위</option>
-                    <option value="head">「총 토큰」 줄 옆</option>
+                    <option value="head">"총 토큰" 줄 옆</option>
                     <option value="side">다른 확장 줄과 나란히 (없으면 목록 위)</option>
                     <option value="bottom">목록 맨 밑 (토글을 다 지나서)</option>
                 </select>
@@ -34,7 +34,7 @@
             <div class="pf-set-row pf-set-ai">
                 <span>AI로 묶기 연결</span>
                 <div id="pf_ai_host"></div>
-                <small class="pf-help">자동 그룹 미리보기의 「AI로 다시 묶기」가 쓸 연결이에요. 지금 채팅 연결 · 실리태번 연결 프로필(모델만 바꿀 수 있음) · 공급자 직접(실리태번에 저장된 키로, 모델을 골라서) 중에서 골라요. 토글 이름만 보내요.</small>
+                <small class="pf-help">자동 그룹 미리보기의 "AI로 다시 묶기"가 쓸 연결이에요. 지금 채팅 연결 · 실리태번 연결 프로필(모델만 바꿀 수 있음) · 공급자 직접(실리태번에 저장된 키로, 모델을 골라서) 중에서 골라요. 토글 이름만 보내요.</small>
             </div>
             <div class="inline-drawer pf-set-prompts">
                 <div class="inline-drawer-toggle inline-drawer-header">
@@ -43,9 +43,9 @@
                 </div>
                 <div class="inline-drawer-content">
                     <div id="pf_promptSets" class="pf-ps">
-                        <small class="pf-help">AI에게 보내는 지시문을 묶음으로 여러 개 저장해 두고 골라 쓸 수 있어요. 고른 묶음이 「AI로 다시 묶기」와 「그룹 이름 한국어로(AI)」에 쓰여요. 답 형식(JSON · 「번호 | 이름」)은 확장이 알아서 붙여요.</small>
+                        <small class="pf-help">AI에게 보내는 지시문을 묶음으로 여러 개 저장해 두고 골라 쓸 수 있어요. 고른 묶음이 "AI로 다시 묶기"와 "그룹 이름 한국어로(AI)"에 쓰여요. 답 형식(JSON · "번호 | 이름")은 확장이 알아서 붙여요.</small>
                         <div class="pf-ps-pills" role="radiogroup" aria-label="지시문 묶음"></div>
-                        <small class="pf-help pf-ps-default-note">기본 지시문은 고칠 수 없어요. 「새 묶음」을 누르면 지금 내용을 복사한 새 묶음이 생겨요.</small>
+                        <small class="pf-help pf-ps-default-note">기본 지시문은 고칠 수 없어요. "새 묶음"을 누르면 지금 내용을 복사한 새 묶음이 생겨요.</small>
                         <div class="pf-ps-namerow">
                             <input type="text" class="text_pole pf-ps-name" placeholder="묶음 이름" maxlength="40">
                             <button type="button" class="pf-ps-del" title="이 묶음 지우기" aria-label="이 묶음 지우기"><i class="fa-solid fa-trash-can"></i></button>
@@ -64,6 +64,10 @@
             <label class="checkbox_label" for="pf_showPos">
                 <input type="checkbox" id="pf_showPos">
                 <span>토글마다 실제 위치(#번호) 보이기</span>
+            </label>
+            <label class="checkbox_label" for="pf_showTags">
+                <input type="checkbox" id="pf_showTags">
+                <span>그룹 없이 볼 때 토글 옆에 그룹 이름 보이기</span>
             </label>
             <label class="checkbox_label" for="pf_wrapNames">
                 <input type="checkbox" id="pf_wrapNames">

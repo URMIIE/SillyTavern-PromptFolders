@@ -23,7 +23,7 @@ const COLORS = ['#7b8cde', '#d9788a', '#4fae94', '#d99a55', '#a47fd1', '#4a9fc9'
 let observer = null;
 let applyTimer = null;
 
-const DEFAULTS = { presets: {}, view: 'grouped', showPos: true, wrapNames: true, syncPreset: true, barPos: 'auto', colorStyle: 'dot', layout: 'real', aiMode: 'chat', aiProfile: '', aiModel: '', aiSource: '', aiSourceModel: '', aiCustomUrl: '', aiNoticeOk: false };
+const DEFAULTS = { presets: {}, view: 'grouped', showPos: true, wrapNames: true, syncPreset: true, barPos: 'auto', colorStyle: 'dot', layout: 'real', aiMode: 'chat', aiProfile: '', aiModel: '', aiSource: '', aiSourceModel: '', aiCustomUrl: '', aiNoticeOk: false, promptSet: 'builtin-complete', showTags: false, helpHidden: false };
 
 // ---------------- 화면 글자 (한국어) ----------------
 let KO = {};
@@ -372,7 +372,8 @@ function apply() {
         setupFreeDrag(list);
 
         if (settings().view === 'original') {
-            // 원래 순서 보기: 그룹 이름 태그만 붙임 (그룹 관계 계산은 한 번만)
+            // 원래 순서 보기: 그룹 이름 태그는 설정에서 켰을 때만 (그룹 관계 계산은 한 번만)
+            if (!settings().showTags) return;
             const tagTree = makeTree(groups);
             rows.forEach(row => {
                 const hit = groupOf.get(row.dataset.pmIdentifier);
@@ -3486,7 +3487,7 @@ function bindPromptSets() {
         const cur = activeSet(); if (!cur || cur.builtin) return;
         if (!(await callGenericPopup(escapeHtml(tr`Delete the instruction set "${cur.name || tr`(no name)`}"?`), POPUP_TYPE.CONFIRM))) return;
         settings().promptSets = promptSets().filter(x => x !== cur);
-        settings().promptSet = '';
+        settings().promptSet = BUILTIN_SETS[0].id;
         saveSettingsDebounced();
         paint();
     });
@@ -3521,7 +3522,12 @@ async function addSettingsPanel() {
         bp.addEventListener('change', () => { settings().barPos = bp.value; saveSettingsDebounced(); apply(); });
     }
     bindPromptSets();
-    for (const key of ['showPos', 'wrapNames', 'syncPreset']) {
+    const help = document.querySelector('#pf_settings .pf-help-intro');
+    if (help) {
+        help.hidden = !!settings().helpHidden;
+        help.querySelector('.pf-help-close')?.addEventListener('click', () => { settings().helpHidden = true; help.hidden = true; saveSettingsDebounced(); });
+    }
+    for (const key of ['showPos', 'wrapNames', 'syncPreset', 'showTags']) {
         const cb = document.getElementById(`pf_${key}`);
         if (!cb) continue;
         cb.checked = !!settings()[key];
