@@ -120,13 +120,15 @@ function pruneSettings() {
     let names = null;
     try { const n = getPresetManager('openai')?.getPresetList()?.preset_names; names = n ? new Set((Array.isArray(n) ? n : Object.keys(n)).map(x => String(x).normalize('NFC'))) : null; } catch { names = null; }
     let removed = 0;
-    const index = s.syncPreset ? presetIndex() : null;
+    // 파일과 견주는 건 지금 프리셋만: 전부 견주면 프리셋마다 내용을 읽어야 해서, 프리셋을 쓸 때만 받아 오는 환경에선 켤 때 프리셋 수만큼 요청이 나감.
+    // 다른 프리셋의 사본은 그 프리셋을 고를 때(syncToPreset) 파일과 같으면 빠짐
+    const here = presetKey();
     for (const [k, v] of Object.entries(s.presets || {})) {
         const empty = !v?.groups?.length;
         const gone = !!names?.size && s.syncPreset && !names.has(k.normalize('NFC'));
         if (empty || gone) { delete s.presets[k]; removed++; continue; }
         // 파일에 같은 그룹이 있으면 settings 사본은 빼고 메모리에만 (접힘 상태는 브라우저 저장소에 따로 있어 견주지 않음)
-        if (s.syncPreset && withoutFolds(fileGroups(k, index)) === withoutFolds(v.groups)) { setPersist(k, false); removed++; }
+        if (s.syncPreset && k === here && withoutFolds(fileGroups(k)) === withoutFolds(v.groups)) { setPersist(k, false); removed++; }
     }
     if (removed) saveSettingsDebounced();
 }
